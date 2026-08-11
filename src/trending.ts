@@ -19,7 +19,10 @@ export const STOPWORDS = new Set(
     + "everything nothing anything please thanks thank yeah okay gonna wanna every always "
     + "never ever mean means give gives took take time long lot bit sure today tonight "
     + "probably maybe quite pretty correct wrong agree agreed done says told tell let lets "
-    + "stand put keep keeps got getting").split(/\s+/),
+    + "stand put keep keeps got getting "
+    // contraction stems left behind when a non-standard apostrophe splits the word
+    + "doesn don didn isn aren wasn weren won wouldn couldn shouldn haven hasn hadn ain mustn "
+    + "wont cant dont didnt doesnt isnt arent wasnt werent wouldnt couldnt shouldnt havent").split(/\s+/),
 );
 
 export interface Trend {
