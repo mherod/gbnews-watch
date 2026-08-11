@@ -1,17 +1,21 @@
 import {
   memo,
   StrictMode,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { createRoot } from "react-dom/client";
 
 import type { ServerMessage, Stats, WireComment } from "../src/wire";
 import { computeTrends, mergeStickyTrends, termRegex, type StickyEntry, type Trend } from "../src/trending";
+import { roomMood, type Mood } from "../src/sentiment";
+import { topEmoji, type EmojiCount } from "../src/emoji";
 
 const FEED_LIMIT = 150;
 /** Rolling window the activity sparkline covers. */
@@ -294,8 +298,60 @@ interface CommentView extends WireComment {
   chatty?: { count: number; windowMin: number };
 }
 
+/** Renders `text` with occurrences of `terms` wrapped in clickable <mark>s. */
+function highlightBody(
+  text: string,
+  terms: readonly string[],
+  filterLower: string | null,
+  onTerm: (term: string) => void,
+): ReactNode {
+  const escaped = [...terms]
+    .filter((t) => t.length >= 3)
+    .sort((a, b) => b.length - a.length) // longest first, so phrases win over their parts
+    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (escaped.length === 0) return text;
+
+  let re: RegExp;
+  try {
+    re = new RegExp(`\\b(${escaped.join("|")})\\b`, "gi");
+  } catch {
+    return text;
+  }
+
+  const nodes: ReactNode[] = [];
+  let last = 0;
+  let key = 0;
+  for (let m = re.exec(text); m !== null; m = re.exec(text)) {
+    if (m.index > last) nodes.push(text.slice(last, m.index));
+    const word = m[0];
+    const isFilter = filterLower !== null && word.toLowerCase() === filterLower;
+    nodes.push(
+      <mark
+        key={key++}
+        className={isFilter ? "hl hl--filter" : "hl"}
+        onClick={(e) => {
+          e.stopPropagation();
+          onTerm(word);
+        }}
+      >
+        {word}
+      </mark>,
+    );
+    last = m.index + word.length;
+    if (m.index === re.lastIndex) re.lastIndex++; // guard against zero-width matches
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
 /** Comment body clamped to a few lines, expandable when it overflows. */
-function CommentBody({ text }: { text: string }) {
+function CommentBody({ text, terms, termsKey, filterLower, onTerm }: {
+  text: string;
+  terms: readonly string[];
+  termsKey: string;
+  filterLower: string | null;
+  onTerm: (term: string) => void;
+}) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
@@ -306,6 +362,12 @@ function CommentBody({ text }: { text: string }) {
     setOverflows(el.scrollHeight - el.clientHeight > 4);
   }, [text, expanded]);
 
+  const content = useMemo(
+    () => highlightBody(text, terms, filterLower, onTerm),
+    // termsKey stands in for the terms array; onTerm is stable.
+    [text, termsKey, filterLower, onTerm],
+  );
+
   const clamped = !expanded;
   const className =
     "comment__body" +
@@ -315,7 +377,7 @@ function CommentBody({ text }: { text: string }) {
   return (
     <>
       <p ref={ref} className={className}>
-        {text}
+        {content}
       </p>
       {overflows && (
         <button type="button" className="comment__more" onClick={() => setExpanded((v) => !v)}>
@@ -326,7 +388,13 @@ function CommentBody({ text }: { text: string }) {
   );
 }
 
-const Comment = memo(function Comment({ c }: { c: CommentView }) {
+const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm }: {
+  c: CommentView;
+  terms: readonly string[];
+  termsKey: string;
+  filterLower: string | null;
+  onTerm: (term: string) => void;
+}) {
   const isReply = c.kind === "reply";
   const style = avatarStyle(c.author);
 
@@ -383,7 +451,13 @@ const Comment = memo(function Comment({ c }: { c: CommentView }) {
           </button>
         )}
 
-        <CommentBody text={c.body.trim()} />
+        <CommentBody
+          text={c.body.trim()}
+          terms={terms}
+          termsKey={termsKey}
+          filterLower={filterLower}
+          onTerm={onTerm}
+        />
 
         <div className="comment__foot">
           {c.likes > 0 && <span className="stat stat--like">♥ {c.likes}</span>}
@@ -411,12 +485,13 @@ function StatTile({ value, label, className }: { value: number; label: string; c
   );
 }
 
-function TrendBar({ trends, filter, onToggle }: {
+function TrendBar({ trends, filter, onToggle, emoji }: {
   trends: Trend[];
   filter: string | null;
   onToggle: (word: string) => void;
+  emoji: EmojiCount[];
 }) {
-  if (trends.length === 0) return null;
+  if (trends.length === 0 && emoji.length === 0) return null;
   return (
     <div className="trends" aria-label="Trending words">
       <span className="trends__label">🔥 Trending</span>
@@ -438,11 +513,21 @@ function TrendBar({ trends, filter, onToggle }: {
           );
         })}
       </div>
+      {emoji.length > 0 && (
+        <div className="trends__emoji" title="Most-used emoji right now" aria-label="Top emoji">
+          {emoji.map((e) => (
+            <span key={e.emoji} className="emoji-chip">
+              <span className="emoji-chip__glyph">{e.emoji}</span>
+              <i>{e.count}</i>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggleFilter }: {
+function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggleFilter, mood, emoji }: {
   stats: Stats;
   connected: boolean;
   arrivals: number[];
@@ -451,6 +536,8 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
   trends: Trend[];
   filter: string | null;
   onToggleFilter: (word: string) => void;
+  mood: Mood | null;
+  emoji: EmojiCount[];
 }) {
   const statusClass = connected && stats.upstream === "live"
     ? "status status--live"
@@ -476,6 +563,16 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
             <span className="status__dot" />
             {statusText}
           </span>
+          {mood && (
+            <span
+              className={`mood mood--${mood.tone}`}
+              title={`Room mood over ${mood.count} recent comments — ${Math.round(mood.negFrac * 100)}% negative, ${Math.round(mood.posFrac * 100)}% positive`}
+            >
+              <span className="mood__emoji">{mood.emoji}</span>
+              {mood.label}
+              {mood.detail && <span className="mood__detail">{mood.detail}</span>}
+            </span>
+          )}
           {stats.clients > 0 && <StatTile value={stats.clients} label="watching" className="meter--accent" />}
           <div className="meter meter--rate">
             <div className="meter__rateline">
@@ -487,7 +584,7 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
           <StatTile value={stats.total} label="session" />
         </div>
       </div>
-      <TrendBar trends={trends} filter={filter} onToggle={onToggleFilter} />
+      <TrendBar trends={trends} filter={filter} onToggle={onToggleFilter} emoji={emoji} />
     </header>
   );
 }
@@ -499,8 +596,28 @@ function App() {
   const now = useNow(1000);
   const trends = useTrends(comments);
   const [filter, setFilter] = useState<string | null>(null);
-  const toggleFilter = (word: string) =>
+  const toggleFilter = useCallback((word: string) => {
     setFilter((cur) => (cur && cur.toLowerCase() === word.toLowerCase() ? null : word));
+  }, []);
+
+  // Terms to highlight inside comment bodies: the current trends plus the
+  // active filter. termsKey is a stable string so the per-comment highlight
+  // memo only recomputes when the set actually changes.
+  const highlightTerms = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of trends) set.add(t.word);
+    if (filter) set.add(filter);
+    return [...set];
+  }, [trends, filter]);
+  const termsKey = highlightTerms.join("|").toLowerCase();
+  const filterLower = filter?.toLowerCase() ?? null;
+
+  // Room mood — recompute when the comment set changes (not every second tick).
+  const mood = useMemo(
+    () => roomMood(comments, Date.now(), { windowMs: 300_000, minScored: 4 }),
+    [comments],
+  );
+  const emoji = useMemo(() => topEmoji(comments, Date.now(), { limit: 5 }), [comments]);
 
   // Attribute a reply to its thread root's body only when the root is in view
   // and its author matches — otherwise the quote could mislabel a sibling reply.
@@ -565,6 +682,8 @@ function App() {
         trends={trends}
         filter={filter}
         onToggleFilter={toggleFilter}
+        mood={mood}
+        emoji={emoji}
       />
       <main className="shell">
         {comments.length === 0 ? (
@@ -603,7 +722,14 @@ function App() {
             ) : (
               <ul className="feed">
                 {filtered.map((c) => (
-                  <Comment key={c.uuid} c={c} />
+                  <Comment
+                    key={c.uuid}
+                    c={c}
+                    terms={highlightTerms}
+                    termsKey={termsKey}
+                    filterLower={filterLower}
+                    onTerm={toggleFilter}
+                  />
                 ))}
               </ul>
             )}

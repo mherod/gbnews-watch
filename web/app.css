@@ -96,6 +96,49 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.mood {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.mood__emoji {
+  font-size: 14px;
+}
+
+.mood__detail {
+  font-weight: 500;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.mood--heated {
+  background: color-mix(in srgb, #ef4444 18%, transparent);
+  color: #ef4444;
+}
+.mood--grumbly {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+}
+.mood--mixed {
+  background: color-mix(in srgb, var(--ink-faint) 18%, transparent);
+  color: var(--ink-soft);
+}
+.mood--warm {
+  background: color-mix(in srgb, var(--live) 16%, transparent);
+  color: var(--live);
+}
+.mood--buzzing {
+  background: color-mix(in srgb, var(--live) 24%, transparent);
+  color: var(--live);
+}
+
 .meter {
   text-align: right;
   line-height: 1.2;
@@ -223,6 +266,43 @@ body {
   gap: 8px;
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+.trends__emoji {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.emoji-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 15px;
+}
+
+.emoji-chip__glyph {
+  line-height: 1;
+}
+
+.emoji-chip i {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+
+@media (max-width: 560px) {
+  .trends__emoji {
+    margin-left: 0;
+    border-left: none;
+    padding-left: 0;
+  }
 }
 
 .trends__chips::-webkit-scrollbar {
@@ -531,6 +611,29 @@ body {
 .comment__body--faded {
   -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent);
   mask-image: linear-gradient(to bottom, #000 72%, transparent);
+}
+
+/* Live-trend highlights inside message bodies. */
+.hl {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.hl:hover {
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+.hl--filter {
+  background: color-mix(in srgb, var(--warn) 30%, transparent);
+  font-weight: 600;
+}
+
+.hl--filter:hover {
+  background: color-mix(in srgb, var(--warn) 45%, transparent);
 }
 
 .comment__more {

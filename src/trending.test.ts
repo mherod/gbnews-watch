@@ -95,6 +95,36 @@ test("never returns more than the limit", () => {
   expect(trends.length).toBeLessThanOrEqual(4);
 });
 
+test("folds singular and plural into one trend", () => {
+  const trends = computeTrends(
+    [c("toilet", { author: "a" }), c("toilets", { author: "b" }), c("toilet", { author: "c" })],
+    NOW,
+  );
+  const toilet = trends.find((t) => t.word.toLowerCase().startsWith("toilet"));
+  expect(toilet?.recent).toBe(3);
+});
+
+test("boosts a proper noun over a generic word of equal breadth", () => {
+  const trends = computeTrends(
+    [
+      c("Burnham", { author: "a" }),
+      c("Burnham", { author: "b" }),
+      c("reckon", { author: "c" }),
+      c("reckon", { author: "d" }),
+    ],
+    NOW,
+  );
+  expect(trends[0]?.word.toLowerCase()).toBe("burnham");
+});
+
+test("strips a contraction so it becomes a stopword", () => {
+  const trends = computeTrends(
+    [c("there's a problem", { author: "a" }), c("there's a problem", { author: "b" })],
+    NOW,
+  );
+  expect(trends.some((t) => t.word.toLowerCase().includes("there"))).toBe(false);
+});
+
 const trend = (word: string, score: number): Trend => ({ word, recent: 3, prior: 0, score });
 
 test("a topic lingers for the dwell time after it stops trending", () => {

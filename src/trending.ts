@@ -18,7 +18,8 @@ export const STOPWORDS = new Set(
     + "back way well own see look come came around really actually something someone "
     + "everything nothing anything please thanks thank yeah okay gonna wanna every always "
     + "never ever mean means give gives took take time long lot bit sure today tonight "
-    + "probably maybe quite pretty correct wrong agree agreed done says told tell").split(/\s+/),
+    + "probably maybe quite pretty correct wrong agree agreed done says told tell let lets "
+    + "stand put keep keeps got getting").split(/\s+/),
 );
 
 export interface Trend {
@@ -49,7 +50,28 @@ export function termRegex(term: string): RegExp {
 }
 
 const TOKEN = /[\p{L}][\p{L}\p{N}'']*/gu;
-const isContentWord = (w: string) => w.length >= 3 && !STOPWORDS.has(w);
+
+/**
+ * Light stemmer: lowercases, drops a possessive/contraction "'s", and folds
+ * common plurals so "toilet"/"toilets" and "party"/"parties" count as one. Not
+ * a full Porter stemmer — just enough to stop obvious duplicates splitting a
+ * trend, and it turns "there's" into the stopword "there".
+ */
+export function normalize(word: string): string {
+  const s = word.toLowerCase().replace(/['']s$/, "");
+  if (s.length > 4 && s.endsWith("ies")) return `${s.slice(0, -3)}y`;
+  if (s.length > 4 && /(?:s|x|z|ch|sh)es$/.test(s)) return s.slice(0, -2);
+  if (s.length > 3 && s.endsWith("s") && !/(?:ss|us|is)$/.test(s)) return s.slice(0, -1);
+  return s;
+}
+
+/** Capitalised but not SHOUTING — a rough proper-noun signal (names, places). */
+export function isCapitalized(word: string): boolean {
+  const first = word[0];
+  return first !== undefined && first !== first.toLowerCase() && word !== word.toUpperCase();
+}
+
+const isContentWord = (stem: string) => stem.length >= 3 && !STOPWORDS.has(stem);
 const bestForm = (forms: Map<string, number>) =>
   [...forms].sort((a, b) => b[1] - a[1])[0]?.[0];
 
@@ -60,6 +82,8 @@ interface Stat {
   recent: number;
   /** Comments using it in the prior window (for the surge factor). */
   prior: number;
+  /** Recent comments where it appeared capitalised (proper-noun signal). */
+  caps: number;
   /** Extra weight from likes/replies on the comments using it. */
   engagement: number;
   /** Original spellings seen, for display casing. */
@@ -68,7 +92,7 @@ interface Stat {
 
 function statFor(map: Map<string, Stat>, key: string): Stat {
   let s = map.get(key);
-  if (!s) map.set(key, (s = { authors: new Set(), recent: 0, prior: 0, engagement: 0, forms: new Map() }));
+  if (!s) map.set(key, (s = { authors: new Set(), recent: 0, prior: 0, caps: 0, engagement: 0, forms: new Map() }));
   return s;
 }
 
@@ -76,12 +100,14 @@ function record(map: Map<string, Stat>, key: string, display: string, ctx: {
   isRecent: boolean;
   author: string;
   weight: number;
+  cap: boolean;
 }) {
   const s = statFor(map, key);
   if (ctx.isRecent) {
     s.recent += 1;
     s.engagement += ctx.weight;
     s.authors.add(ctx.author);
+    if (ctx.cap) s.caps += 1;
     s.forms.set(display, (s.forms.get(display) ?? 0) + 1);
   } else {
     s.prior += 1;
@@ -127,16 +153,20 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     const author = c.author ?? "";
     // Diminishing engagement weight so a viral comment can't fully dominate.
     const weight = Math.min(6, (c.likes ?? 0) * 0.25 + (c.replies ?? 0) * 0.5);
-    const ctx = { isRecent, author, weight };
     const matches = [...c.body.matchAll(TOKEN)];
 
-    const seenUni = new Set<string>();
+    // Collect each unique stem once per comment, remembering a display spelling
+    // and whether it showed up capitalised anywhere in this comment.
+    const seenUni = new Map<string, { display: string; cap: boolean }>();
     for (const m of matches) {
-      const lower = m[0].toLowerCase();
-      if (!isContentWord(lower) || seenUni.has(lower)) continue;
-      seenUni.add(lower);
-      record(uni, lower, m[0], ctx);
+      const stem = normalize(m[0]);
+      if (!isContentWord(stem)) continue;
+      const cap = isCapitalized(m[0]);
+      const prev = seenUni.get(stem);
+      if (!prev) seenUni.set(stem, { display: m[0], cap });
+      else if (cap) prev.cap = true;
     }
+    for (const [stem, info] of seenUni) record(uni, stem, info.display, { isRecent, author, weight, cap: info.cap });
 
     // Adjacent content words separated by whitespace only, so "Yesss…. Paul"
     // never bridges punctuation into a phrase.
@@ -146,20 +176,27 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       const next = matches[i + 1]!;
       const gap = c.body.slice(cur.index! + cur[0].length, next.index!);
       if (!/^\s+$/.test(gap)) continue;
-      const a = cur[0].toLowerCase();
-      const b = next[0].toLowerCase();
+      const a = normalize(cur[0]);
+      const b = normalize(next[0]);
       if (!isContentWord(a) || !isContentWord(b)) continue;
       const key = `${a} ${b}`;
       if (seenBi.has(key)) continue;
       seenBi.add(key);
-      record(bi, key, `${cur[0]} ${next[0]}`, ctx);
+      record(bi, key, `${cur[0]} ${next[0]}`, {
+        isRecent,
+        author,
+        weight,
+        cap: isCapitalized(cur[0]) && isCapitalized(next[0]),
+      });
     }
   }
 
   const score = (s: Stat) => {
     const base = s.authors.size + s.engagement; // people + reactions
     const surge = Math.min(3, Math.max(0.6, (s.recent + 1) / (s.prior + 1)));
-    return base * surge;
+    // Proper nouns (consistently capitalised names/places) beat generic words.
+    const properNoun = s.recent >= 2 && s.caps / s.recent >= 0.6 ? 1.5 : 1;
+    return base * surge * properNoun;
   };
   const toTrend = (key: string, s: Stat, boost: number, parts?: string[]): Trend => ({
     word: bestForm(s.forms) ?? key,
