@@ -1,0 +1,5 @@
+.claude
+scripts
+src/*.test.ts
+*.log
+CLAUDE.md

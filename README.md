@@ -1,13 +1,30 @@
 # gbnews-watch
 
-Streams GB News "Have Your Say" comments to your terminal as they are posted.
+Streams GB News "Have Your Say" comments as they are posted — to a web UI, or to
+your terminal.
 
 ```bash
 bun install
-bun run index.ts
+bun run start      # http://localhost:3000
 ```
 
-Comments and replies appear oldest-first as they arrive:
+A single Bun process holds one upstream subscription and fans it out to every
+open tab. Comments appear newest-first, typically under half a second after
+someone hits send.
+
+| Route | |
+| --- | --- |
+| `/` | the live feed UI |
+| `/ws` | websocket — a snapshot on connect, then one message per comment |
+| `/api/health` | buffered count, comments/min, upstream state, connected tabs |
+
+Set `PORT` to serve somewhere else.
+
+## Terminal
+
+```bash
+bun run cli --backfill 10
+```
 
 ```
 00:16:41  Babs Berg  FEATURED
@@ -17,7 +34,7 @@ Comments and replies appear oldest-first as they arrive:
           Spot on molly 👌
 ```
 
-## Options
+### Options
 
 | Flag | Description |
 | --- | --- |
@@ -25,7 +42,8 @@ Comments and replies appear oldest-first as they arrive:
 | `--container-id <id>` | Resolve the thread from a `vf:container_id` value |
 | `--container <uuid>` | Viafoura container UUID (default: the `/watch/live` thread) |
 | `--section <uuid>` | Viafoura section UUID (default: GB News) |
-| `--interval <seconds>` | Poll interval (default: `3`) |
+| `--transport <mode>` | `socket` for realtime push (default) or `poll` |
+| `--interval <seconds>` | Poll interval — the safety net under `socket` (default: `30` for socket, `3` for poll) |
 | `--limit <n>` | Root comments fetched per poll (default: `50`) |
 | `--backfill <n>` | Print the `n` most recent comments before going live |
 | `--no-replies` | Only follow top-level comments |
@@ -34,13 +52,94 @@ Comments and replies appear oldest-first as they arrive:
 Pipe the JSON mode anywhere:
 
 ```bash
-bun run index.ts --json | jq -r '"\(.author): \(.body)"'
+bun run cli --json | jq -r '"\(.author): \(.body)"'
 ```
+
+## Deploying to Vercel
+
+```bash
+vercel deploy
+```
+
+`vercel.json` is all the configuration needed — no environment variables, since
+the Viafoura read APIs are public.
+
+```json
+{
+  "bunVersion": "1.x",
+  "regions": ["lhr1"],
+  "functions": { "index.ts": { "maxDuration": 300 } }
+}
+```
+
+`bunVersion` puts Functions on the Bun runtime so `Bun.serve` and its websockets
+work as they do locally. Vercel detects `index.ts` as the server entrypoint and
+routes everything to it — which is why the terminal client lives in `cli.ts`: a
+root `index.ts` that never calls `listen()` would deploy a server that never
+answers.
+
+Three things behave differently in production:
+
+- **One subscription per instance, not per deployment.** Locally a single
+  process holds one upstream socket for every tab. Vercel scales instances
+  independently, so each one opens its own Viafoura subscription and runs its
+  own backfill. Fine at this size, but it isn't the shared-upstream model.
+- **Connections end when the function does.** `maxDuration` caps a websocket's
+  life, so clients will periodically reconnect. The frontend already backs off
+  exponentially, which is what Vercel's own websocket guidance recommends.
+- **An idle socket still costs money.** A connection held open keeps an
+  instance alive. A feed nobody is watching bills nothing only if nobody has a
+  tab open.
+
+If you would rather have the shared-upstream model and flat pricing, this same
+server runs unchanged on any host that keeps a process alive — `bun run start`
+behind a reverse proxy is the whole deployment.
+
+## Layout
+
+| | |
+| --- | --- |
+| `src/viafoura.ts` | REST client — comments, replies, user lookups, container resolution |
+| `src/realtime.ts` | the websocket subscription and its reconnect loop |
+| `src/stream.ts` | merges both sources into one de-duplicated stream |
+| `src/app-server.ts` | serves the UI and fans the stream out to browser tabs |
+| `web/` | the React frontend, bundled by Bun's HTML import |
+| `index.ts` | the server — also Vercel's detected entrypoint |
+| `cli.ts` | the terminal client |
+
+`app-server.ts` takes its stream as an argument rather than creating one, so
+tests drive the websocket without waiting on live GB News traffic.
 
 ## How it works
 
-GB News' comments run on [Viafoura](https://viafoura.com). The read APIs are
-public — no login, no API key:
+GB News' comments run on [Viafoura](https://viafoura.com). Nothing here needs a
+login or an API key.
+
+**Realtime (default).** The page keeps one websocket open to
+`wss://realtimeeventfeeds.viafoura.co/eventfeed?site_uuid={section}` and receives
+every new comment on it — the whole comment, not just an id. `src/realtime.ts`
+opens the same socket and sends:
+
+```json
+{ "type": "subscribe", "subscription_id": "<uuid>", "filter": { "rules": [
+  { "type": "one_of", "key": "container_uuid", "values": ["<container>"] },
+  { "type": "one_of", "key": "message_type", "values": ["livecomment_post", "reply_to_livecomment_post"] },
+  { "type": "one_of", "key": "action", "values": ["created", "visible"] }
+]}}
+```
+
+The rules are AND-ed server-side, and all three matter. Over one 75-second
+window, filtering on `container_uuid` alone delivered 57,199 events / 93 MB —
+99.8% of it an unrelated notification firehose. Adding the `message_type` and
+`action` rules brought the same comments down to 0.02 MB. Keep-alives go up
+every 30s as `{"type":"keep-alive"}`.
+
+Each comment is announced twice: `action: "created"` while it awaits moderation,
+then `action: "visible"` once it clears. Only `payload.state === "visible"` is
+emitted.
+
+**REST.** Used as a slow safety net under the socket, and as the only source
+under `--transport poll`:
 
 - `GET https://livecomments.viafoura.co/v4/livecomments/{section}/{container}/comments?limit&sorted_by=newest`
   — newest-first page of top-level comments.
@@ -48,13 +147,13 @@ public — no login, no API key:
 - `GET https://iam.viafoura.co/v3/sections/{section}/users/{actor_uuid}` — display
   names, which comments carry only as `actor_uuid`.
 
-`src/stream.ts` polls the first endpoint and de-duplicates by `content_uuid`. It
-watches each thread's `total_replies` and only re-fetches a thread when that
-count changes, so replies are picked up without polling every thread.
+The poll watches each thread's `total_replies` and only re-fetches a thread when
+that count changes. Both sources feed one de-duplication set keyed on
+`content_uuid`, so a comment seen twice is emitted once and a socket reconnect
+loses nothing.
 
-The browser widget gets new comments pushed over a websocket rather than
-polling. Swapping the poll loop for that socket would cut latency, but polling
-needs no session and reconnects for free.
+Measured on the live feed: socket median **398 ms** behind the posted timestamp,
+3-second polling median **2,557 ms**.
 
 ### Container UUIDs
 
@@ -69,3 +168,29 @@ is hardcoded in `src/viafoura.ts`.
 ```bash
 bun test
 ```
+
+## Diagnostic scripts
+
+Kept around so the next investigation starts from evidence rather than guesswork:
+
+```bash
+bun scripts/debug-viafoura-socket.ts --seconds 75
+```
+
+Opens several subscriptions side by side with different filter rules and reports
+events, matched container, and bytes per rule set. This is what established that
+the rules are AND-ed.
+
+```bash
+bun scripts/debug-stream-latency.ts --seconds 90 --transport socket
+```
+
+Runs the real stream and reports, per comment, which source delivered it first
+and how far behind the posted timestamp it arrived.
+
+```bash
+bun scripts/debug-empty-state.ts
+```
+
+Serves the real UI against a source that never emits, so the waiting state can
+be inspected without waiting for GB News to go quiet.

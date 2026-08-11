@@ -13,6 +13,8 @@ coverage
 # logs
 logs
 _.log
+# debug script output — the scripts themselves are kept, their runs are not
+scripts/*.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # dotenv environment variable files

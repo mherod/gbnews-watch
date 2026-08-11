@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "bunVersion": "1.x",
+  "regions": ["lhr1"],
+  "functions": {
+    "index.ts": {
+      "maxDuration": 300
+    }
+  }
+}

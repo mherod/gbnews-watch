@@ -1,3 +1,4 @@
+import { AsyncQueue, subscribeComments } from "./realtime.ts";
 import {
   listComments,
   listReplies,
@@ -23,16 +24,23 @@ export interface StreamedComment {
   isPicked: boolean;
   isTopComment: boolean;
   isEdited: boolean;
+  /** Which source delivered it first. */
+  via: "socket" | "poll";
   sourceUrl?: string;
 }
 
 export type StreamEvent =
   | { type: "comment"; comment: StreamedComment }
   | { type: "primed"; tracking: number }
+  | { type: "notice"; text: string }
   | { type: "error"; error: unknown; retryInMs: number };
 
+export type Transport = "socket" | "poll";
+
 export interface StreamOptions extends ContainerRef {
-  /** Milliseconds between polls. */
+  /** `socket` pushes in real time; `poll` only hits the REST API. */
+  transport?: Transport;
+  /** Milliseconds between polls (also the socket transport's safety net). */
   intervalMs?: number;
   /** Root comments fetched per poll. */
   pageLimit?: number;
@@ -103,83 +111,145 @@ async function mapLimit<T, R>(
   return results;
 }
 
+type Ingest =
+  | { kind: "comments"; comments: VfComment[]; via: "socket" | "poll"; priming?: boolean }
+  | { kind: "notice"; text: string }
+  | { kind: "error"; error: unknown; retryInMs: number };
+
 /**
- * Polls the Viafoura API and yields each comment once, oldest first.
+ * Yields each comment once, oldest first.
  *
- * New replies are picked up by watching each thread's `total_replies` and only
- * re-fetching threads whose count changed since the last poll.
+ * The socket transport receives whole comments pushed from Viafoura, with the
+ * REST poll left running at a slower cadence as a safety net — anything the
+ * socket misses during a reconnect still turns up, and de-duplication means a
+ * comment seen twice is only emitted once.
  */
 export async function* streamComments(options: StreamOptions): AsyncGenerator<StreamEvent> {
   const {
     sectionUuid,
     containerUuid,
-    intervalMs = 3_000,
+    transport = "socket",
+    intervalMs = transport === "socket" ? 30_000 : 3_000,
     pageLimit = 50,
     replyLimit = 50,
     includeReplies = true,
     backfill = 0,
     memory = 5_000,
-    signal,
+    signal: externalSignal,
   } = options;
+
+  // Own controller so that a consumer who stops iterating also stops the sources.
+  const control = new AbortController();
+  const signal = control.signal;
+  externalSignal?.addEventListener("abort", () => control.abort(), { once: true });
+  if (externalSignal?.aborted) control.abort();
 
   const ref: ContainerRef = { sectionUuid, containerUuid };
   const users = new UserDirectory(sectionUuid);
   const seen = new RecentSet(memory);
-  const replyCounts = new Map<string, number>();
+  const queue = new AsyncQueue<Ingest>();
+
+  const poller = pollLoop();
+  const pusher = transport === "socket" ? socketLoop() : Promise.resolve();
+  void Promise.all([poller, pusher]).then(() => queue.close());
+  signal.addEventListener("abort", () => queue.close(), { once: true });
 
   let priming = true;
-  let failures = 0;
 
-  while (!signal?.aborted) {
-    try {
-      const page = await listComments(ref, { limit: pageLimit, signal });
-      const roots = page.contents.filter((c) => c.state === "visible");
-      const fresh: VfComment[] = roots.filter((c) => !seen.has(c.content_uuid));
-
-      if (includeReplies) {
-        const stale = roots.filter(
-          (c) => c.total_replies > 0 && replyCounts.get(c.content_uuid) !== c.total_replies,
-        );
-        const pages = await mapLimit(stale, 4, (thread) =>
-          listReplies(ref, thread.content_uuid, { limit: replyLimit, signal }).catch(() => null),
-        );
-        for (const [index, replyPage] of pages.entries()) {
-          const thread = stale[index]!;
-          if (!replyPage) continue;
-          replyCounts.set(thread.content_uuid, thread.total_replies);
-          for (const reply of replyPage.contents) {
-            if (reply.state === "visible" && !seen.has(reply.content_uuid)) fresh.push(reply);
-          }
-        }
+  try {
+    for await (const ingest of queue) {
+      if (ingest.kind === "notice") {
+        yield { type: "notice", text: ingest.text };
+        continue;
+      }
+      if (ingest.kind === "error") {
+        yield { type: "error", error: ingest.error, retryInMs: ingest.retryInMs };
+        continue;
       }
 
+      const fresh = ingest.comments.filter(
+        (comment) => comment.state === "visible" && !seen.has(comment.content_uuid),
+      );
       for (const comment of fresh) seen.add(comment.content_uuid);
       fresh.sort((a, b) => a.time - b.time);
 
-      const emitting = priming ? (backfill > 0 ? fresh.slice(-backfill) : []) : fresh;
+      const emitting = ingest.priming ? (backfill > 0 ? fresh.slice(-backfill) : []) : fresh;
       for (const comment of emitting) {
-        yield { type: "comment", comment: await present(comment, users, signal) };
+        yield { type: "comment", comment: await present(comment, ingest.via, users, signal) };
       }
 
-      if (priming) {
+      if (ingest.priming && priming) {
         priming = false;
         yield { type: "primed", tracking: seen.size };
       }
-      failures = 0;
-    } catch (error) {
-      if (signal?.aborted) break;
-      const retryInMs = Math.min(30_000, 2_000 * 2 ** failures++);
-      yield { type: "error", error, retryInMs };
-      await sleep(retryInMs, signal);
-      continue;
     }
+  } finally {
+    control.abort();
+  }
 
-    await sleep(intervalMs, signal);
+  /** REST poll: the only source under `--transport poll`, a safety net otherwise. */
+  async function pollLoop() {
+    const replyCounts = new Map<string, number>();
+    let first = true;
+    let failures = 0;
+
+    while (!signal?.aborted) {
+      try {
+        const page = await listComments(ref, { limit: pageLimit, signal });
+        const roots = page.contents.filter((c) => c.state === "visible");
+        const collected = [...roots];
+
+        if (includeReplies) {
+          const stale = roots.filter(
+            (c) => c.total_replies > 0 && replyCounts.get(c.content_uuid) !== c.total_replies,
+          );
+          const pages = await mapLimit(stale, 4, (thread) =>
+            listReplies(ref, thread.content_uuid, { limit: replyLimit, signal }).catch(() => null),
+          );
+          for (const [index, replyPage] of pages.entries()) {
+            const thread = stale[index]!;
+            if (!replyPage) continue;
+            replyCounts.set(thread.content_uuid, thread.total_replies);
+            collected.push(...replyPage.contents);
+          }
+        }
+
+        queue.push({ kind: "comments", comments: collected, via: "poll", priming: first });
+        first = false;
+        failures = 0;
+      } catch (error) {
+        if (signal?.aborted) break;
+        const retryInMs = Math.min(30_000, 2_000 * 2 ** failures++);
+        queue.push({ kind: "error", error, retryInMs });
+        await sleep(retryInMs, signal);
+        continue;
+      }
+
+      await sleep(intervalMs, signal);
+    }
+  }
+
+  /** Realtime feed: whole comments, pushed as they clear moderation. */
+  async function socketLoop() {
+    for await (const event of subscribeComments(ref, { signal })) {
+      switch (event.type) {
+        case "comment":
+          queue.push({ kind: "comments", comments: [event.comment], via: "socket" });
+          break;
+        case "closed":
+          queue.push({
+            kind: "notice",
+            text: `Realtime feed closed (${event.code}${event.reason ? ` ${event.reason}` : ""}) — reconnecting in ${event.retryInMs / 1000}s`,
+          });
+          break;
+      }
+    }
   }
 }
 
 async function present(
   comment: VfComment,
+  via: "socket" | "poll",
   users: UserDirectory,
   signal?: AbortSignal,
 ): Promise<StreamedComment> {
@@ -207,6 +277,7 @@ async function present(
     isPicked: comment.is_picked,
     isTopComment: comment.is_top_comment,
     isEdited: comment.is_edited,
+    via,
     sourceUrl: comment.metadata?.origin_url,
   };
 }

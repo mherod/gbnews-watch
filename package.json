@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "bun run index.ts",
+    "dev": "bun run --hot index.ts",
+    "cli": "bun run cli.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
@@ -11,5 +13,11 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   }
 }
