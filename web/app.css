@@ -188,6 +188,78 @@ body {
   }
 }
 
+/* ---------- trending ---------- */
+
+.trends {
+  max-width: 720px;
+  margin: 12px auto 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  animation: trends-in 0.35s ease;
+}
+
+@keyframes trends-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.trends__label {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--warn);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.trends__chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.trends__chips::-webkit-scrollbar {
+  display: none;
+}
+
+.trends__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: trends-in 0.35s ease;
+}
+
+.trends__chip i {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trends,
+  .trends__chip {
+    animation: none;
+  }
+}
+
 /* ---------- feed ---------- */
 
 .feed__meta {
@@ -243,14 +315,19 @@ body {
   background: var(--panel-2);
 }
 
-.comment__rail {
+/* Reply accent stripe: a pseudo-element, never a grid child, so it cannot
+   disturb the avatar + main columns. Colour comes from the --rail variable set
+   on the <li>. */
+.comment--reply::before {
+  content: "";
   position: absolute;
-  left: -12px;
-  top: 10px;
-  bottom: 10px;
+  left: 0;
+  top: 0;
+  bottom: 0;
   width: 3px;
-  border-radius: 3px;
-  opacity: 0.85;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: var(--rail, var(--accent));
+  opacity: 0.9;
 }
 
 .comment--flash {

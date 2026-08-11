@@ -1,7 +1,8 @@
-import { memo, StrictMode, useEffect, useMemo, useRef, useState } from "react";
+import { memo, StrictMode, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 
 import type { ServerMessage, Stats, WireComment } from "../src/wire";
+import { computeTrends, type Trend } from "../src/trending";
 
 const FEED_LIMIT = 150;
 /** Rolling window the activity sparkline covers. */
@@ -9,6 +10,12 @@ const SPARK_WINDOW_MS = 90_000;
 const SPARK_BUCKETS = 30;
 
 // ---------------------------------------------------------------- helpers
+
+/** Keep the first occurrence of each comment uuid, preserving order. */
+function dedupe(comments: WireComment[]): WireComment[] {
+  const seen = new Set<string>();
+  return comments.filter((c) => (seen.has(c.uuid) ? false : (seen.add(c.uuid), true)));
+}
 
 function initials(name: string) {
   const words = name.replace(/[^\p{L}\p{N} ]/gu, "").trim().split(/\s+/).filter(Boolean);
@@ -118,7 +125,7 @@ function useCommentFeed(): FeedState {
         const res = await fetch("/api/health");
         if (!res.ok) return;
         const data = await res.json();
-        if (data.comments) setComments(data.comments.slice(0, FEED_LIMIT));
+        if (data.comments) setComments(dedupe(data.comments).slice(0, FEED_LIMIT));
         setStats({
           total: data.total ?? 0,
           perMinute: data.perMinute ?? 0,
@@ -145,9 +152,15 @@ function useCommentFeed(): FeedState {
       socket.onmessage = (event) => {
         const message: ServerMessage = JSON.parse(event.data);
         setStats(message.stats);
-        if (message.type === "snapshot") setComments(message.comments.slice(0, FEED_LIMIT));
+        if (message.type === "snapshot") setComments(dedupe(message.comments).slice(0, FEED_LIMIT));
         if (message.type === "comment") {
-          setComments((current) => [message.comment, ...current].slice(0, FEED_LIMIT));
+          const incoming = message.comment;
+          setComments((current) => {
+            // The same comment can arrive twice (socket + poll, or a re-broadcast);
+            // keep one copy so React keys stay unique and the feed doesn't repeat.
+            if (current.some((c) => c.uuid === incoming.uuid)) return current;
+            return [incoming, ...current].slice(0, FEED_LIMIT);
+          });
           recordArrival();
         }
       };
@@ -195,6 +208,20 @@ function useNow(intervalMs = 1000) {
     return () => clearInterval(timer);
   }, [intervalMs]);
   return now;
+}
+
+/** Recomputes trending words every few seconds, off the render/time path. */
+function useTrends(comments: WireComment[]) {
+  const [trends, setTrends] = useState<Trend[]>([]);
+  const latest = useRef(comments);
+  latest.current = comments;
+  useEffect(() => {
+    const compute = () => setTrends(computeTrends(latest.current, Date.now()));
+    compute();
+    const timer = setInterval(compute, 4000);
+    return () => clearInterval(timer);
+  }, []);
+  return trends;
 }
 
 // ---------------------------------------------------------------- sparkline
@@ -260,9 +287,14 @@ const Comment = memo(function Comment({ c }: { c: CommentView }) {
     el.classList.add("comment--flash");
   };
 
+  // The reply rail is a ::before pseudo-element tinted by this variable, not a
+  // real child — so it can never become a stray grid item and break the layout.
+  const liStyle = isReply
+    ? ({ "--rail": `hsl(${hue(c.author)} 55% 50%)` } as CSSProperties)
+    : undefined;
+
   return (
-    <li id={`c-${c.uuid}`} className={`comment${isReply ? " comment--reply" : ""}`}>
-      {isReply && <span className="comment__rail" style={{ background: `hsl(${hue(c.author)} 55% 50%)` }} />}
+    <li id={`c-${c.uuid}`} className={`comment${isReply ? " comment--reply" : ""}`} style={liStyle}>
       <div className="avatar" style={style} aria-hidden="true">
         {initials(c.author)}
       </div>
@@ -318,12 +350,30 @@ function StatTile({ value, label, className }: { value: number; label: string; c
   );
 }
 
-function Header({ stats, connected, arrivals, peak, now }: {
+function TrendBar({ trends }: { trends: Trend[] }) {
+  if (trends.length === 0) return null;
+  return (
+    <div className="trends" aria-label="Trending words">
+      <span className="trends__label">🔥 Trending</span>
+      <div className="trends__chips">
+        {trends.map((t) => (
+          <span key={t.word} className="trends__chip">
+            {t.word}
+            <i>{t.recent}</i>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Header({ stats, connected, arrivals, peak, now, trends }: {
   stats: Stats;
   connected: boolean;
   arrivals: number[];
   peak: number;
   now: number;
+  trends: Trend[];
 }) {
   const statusClass = connected && stats.upstream === "live"
     ? "status status--live"
@@ -360,6 +410,7 @@ function Header({ stats, connected, arrivals, peak, now }: {
           <StatTile value={stats.total} label="session" />
         </div>
       </div>
+      <TrendBar trends={trends} />
     </header>
   );
 }
@@ -369,6 +420,7 @@ function Header({ stats, connected, arrivals, peak, now }: {
 function App() {
   const { comments, stats, connected, arrivals, peakPerMinute } = useCommentFeed();
   const now = useNow(1000);
+  const trends = useTrends(comments);
 
   // Attribute a reply to its thread root's body only when the root is in view
   // and its author matches — otherwise the quote could mislabel a sibling reply.
@@ -391,7 +443,7 @@ function App() {
 
   return (
     <>
-      <Header stats={stats} connected={connected} arrivals={arrivals} peak={peakPerMinute} now={now} />
+      <Header stats={stats} connected={connected} arrivals={arrivals} peak={peakPerMinute} now={now} trends={trends} />
       <main className="shell">
         {comments.length === 0 ? (
           <div className="waiting">
