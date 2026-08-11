@@ -36,6 +36,12 @@ export interface TrendInput {
   postedAt: string;
 }
 
+/** Whole-word, case-insensitive matcher for filtering the feed by a trend. */
+export function termRegex(term: string): RegExp {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b${escaped}\\b`, "i");
+}
+
 const TOKEN = /[\p{L}][\p{L}\p{N}'']*/gu;
 const isContentWord = (w: string) => w.length >= 3 && !STOPWORDS.has(w);
 const bestForm = (forms?: Map<string, number>) =>

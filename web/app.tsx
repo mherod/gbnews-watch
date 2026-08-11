@@ -2,7 +2,7 @@ import { memo, StrictMode, useEffect, useMemo, useRef, useState, type CSSPropert
 import { createRoot } from "react-dom/client";
 
 import type { ServerMessage, Stats, WireComment } from "../src/wire";
-import { computeTrends, type Trend } from "../src/trending";
+import { computeTrends, termRegex, type Trend } from "../src/trending";
 
 const FEED_LIMIT = 150;
 /** Rolling window the activity sparkline covers. */
@@ -350,30 +350,46 @@ function StatTile({ value, label, className }: { value: number; label: string; c
   );
 }
 
-function TrendBar({ trends }: { trends: Trend[] }) {
+function TrendBar({ trends, filter, onToggle }: {
+  trends: Trend[];
+  filter: string | null;
+  onToggle: (word: string) => void;
+}) {
   if (trends.length === 0) return null;
   return (
     <div className="trends" aria-label="Trending words">
       <span className="trends__label">🔥 Trending</span>
       <div className="trends__chips">
-        {trends.map((t) => (
-          <span key={t.word} className="trends__chip">
-            {t.word}
-            <i>{t.recent}</i>
-          </span>
-        ))}
+        {trends.map((t) => {
+          const active = filter?.toLowerCase() === t.word.toLowerCase();
+          return (
+            <button
+              key={t.word}
+              type="button"
+              className={`trends__chip${active ? " trends__chip--active" : ""}`}
+              aria-pressed={active}
+              title={active ? `Clear filter` : `Filter to “${t.word}”`}
+              onClick={() => onToggle(t.word)}
+            >
+              {t.word}
+              <i>{t.recent}</i>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function Header({ stats, connected, arrivals, peak, now, trends }: {
+function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggleFilter }: {
   stats: Stats;
   connected: boolean;
   arrivals: number[];
   peak: number;
   now: number;
   trends: Trend[];
+  filter: string | null;
+  onToggleFilter: (word: string) => void;
 }) {
   const statusClass = connected && stats.upstream === "live"
     ? "status status--live"
@@ -410,7 +426,7 @@ function Header({ stats, connected, arrivals, peak, now, trends }: {
           <StatTile value={stats.total} label="session" />
         </div>
       </div>
-      <TrendBar trends={trends} />
+      <TrendBar trends={trends} filter={filter} onToggle={onToggleFilter} />
     </header>
   );
 }
@@ -421,6 +437,9 @@ function App() {
   const { comments, stats, connected, arrivals, peakPerMinute } = useCommentFeed();
   const now = useNow(1000);
   const trends = useTrends(comments);
+  const [filter, setFilter] = useState<string | null>(null);
+  const toggleFilter = (word: string) =>
+    setFilter((cur) => (cur && cur.toLowerCase() === word.toLowerCase() ? null : word));
 
   // Attribute a reply to its thread root's body only when the root is in view
   // and its author matches — otherwise the quote could mislabel a sibling reply.
@@ -437,13 +456,30 @@ function App() {
     });
   }, [comments, now]);
 
+  const filtered = useMemo(() => {
+    if (!filter) return views;
+    const re = termRegex(filter);
+    return views.filter(
+      (v) => re.test(v.body) || re.test(v.author) || (v.replyingTo ? re.test(v.replyingTo) : false),
+    );
+  }, [views, filter]);
+
   const replyShare = comments.length
     ? Math.round((comments.filter((c) => c.kind === "reply").length / comments.length) * 100)
     : 0;
 
   return (
     <>
-      <Header stats={stats} connected={connected} arrivals={arrivals} peak={peakPerMinute} now={now} trends={trends} />
+      <Header
+        stats={stats}
+        connected={connected}
+        arrivals={arrivals}
+        peak={peakPerMinute}
+        now={now}
+        trends={trends}
+        filter={filter}
+        onToggleFilter={toggleFilter}
+      />
       <main className="shell">
         {comments.length === 0 ? (
           <div className="waiting">
@@ -456,16 +492,35 @@ function App() {
           </div>
         ) : (
           <>
-            {replyShare > 0 && (
-              <p className="feed__meta">
-                {comments.length} recent · {replyShare}% replies
+            {filter ? (
+              <p className="feed__meta feed__meta--filter">
+                <span>
+                  Filtering <b>“{filter}”</b> · {filtered.length} {filtered.length === 1 ? "match" : "matches"}
+                </span>
+                <button type="button" className="feed__clear" onClick={() => setFilter(null)}>
+                  Clear ✕
+                </button>
               </p>
+            ) : (
+              replyShare > 0 && (
+                <p className="feed__meta">
+                  {comments.length} recent · {replyShare}% replies
+                </p>
+              )
             )}
-            <ul className="feed">
-              {views.map((c) => (
-                <Comment key={c.uuid} c={c} />
-              ))}
-            </ul>
+            {filtered.length === 0 ? (
+              <div className="waiting">
+                <p>
+                  No comments mention “{filter}” in the last few minutes. It may scroll past as new ones arrive.
+                </p>
+              </div>
+            ) : (
+              <ul className="feed">
+                {filtered.map((c) => (
+                  <Comment key={c.uuid} c={c} />
+                ))}
+              </ul>
+            )}
           </>
         )}
       </main>

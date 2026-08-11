@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { computeTrends, type TrendInput } from "./trending";
+import { computeTrends, termRegex, type TrendInput } from "./trending";
 
 const NOW = 1_000_000_000_000;
 
@@ -56,6 +56,16 @@ test("ignores stopwords and words below the count floor", () => {
 });
 
 const STOPSAMPLE = ["they", "are", "here", "now"];
+
+test("termRegex matches whole words and phrases, case-insensitively", () => {
+  expect(termRegex("Labour").test("blame Labour now")).toBe(true);
+  expect(termRegex("labour").test("Labour did it")).toBe(true);
+  expect(termRegex("Paul Cox").test("love Paul Cox tonight")).toBe(true);
+  // whole-word only: "bill" must not match "billion"
+  expect(termRegex("bill").test("a billion pounds")).toBe(false);
+  // a term with regex-special chars is treated literally
+  expect(() => termRegex("C++ (test)")).not.toThrow();
+});
 
 test("counts each word once per comment so one ranter can't dominate", () => {
   const trends = computeTrends(
