@@ -68,15 +68,14 @@ the Viafoura read APIs are public.
 {
   "bunVersion": "1.x",
   "regions": ["lhr1"],
-  "functions": { "index.ts": { "maxDuration": 300 } }
+  "functions": { "api/index.ts": { "maxDuration": 300 } },
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
 }
 ```
 
 `bunVersion` puts Functions on the Bun runtime so `Bun.serve` and its websockets
-work as they do locally. Vercel detects `index.ts` as the server entrypoint and
-routes everything to it — which is why the terminal client lives in `cli.ts`: a
-root `index.ts` that never calls `listen()` would deploy a server that never
-answers.
+work as they do locally. Vercel detects `api/index.ts` as the serverless function
+entrypoint and routes everything to it via the rewrite rule.
 
 Three things behave differently in production:
 

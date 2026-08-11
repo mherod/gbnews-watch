@@ -28,10 +28,12 @@ const IDLE_TIMEOUT_SECONDS = 120;
 export interface CommentServer {
   url: URL;
   port: number;
+  fetch(request: Request): Response | Promise<Response>;
   /** Resolves when the source is exhausted. */
   finished: Promise<void>;
   stop(): Promise<void>;
 }
+
 
 function toWire(comment: StreamedComment): WireComment {
   return { ...comment, postedAt: comment.postedAt.toISOString() };
@@ -145,10 +147,12 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
   return {
     url: server.url,
     port: server.port!,
+    fetch: (request: Request) => server.fetch(request),
     finished,
     stop: async () => {
       clearInterval(heartbeat);
       await server.stop(true);
     },
   };
+
 }
