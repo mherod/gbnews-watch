@@ -1,4 +1,13 @@
-import { memo, StrictMode, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  memo,
+  StrictMode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { createRoot } from "react-dom/client";
 
 import type { ServerMessage, Stats, WireComment } from "../src/wire";
@@ -271,6 +280,40 @@ interface CommentView extends WireComment {
   timeLabel: string;
   /** Body of the thread root, when we can attribute it to `replyingTo`. */
   parentQuote?: string;
+  /** Set when this author has been posting frequently. */
+  chatty?: { count: number; windowMin: number };
+}
+
+/** Comment body clamped to a few lines, expandable when it overflows. */
+function CommentBody({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || expanded) return; // only measurable while clamped
+    setOverflows(el.scrollHeight - el.clientHeight > 4);
+  }, [text, expanded]);
+
+  const clamped = !expanded;
+  const className =
+    "comment__body" +
+    (clamped ? " comment__body--clamped" : "") +
+    (clamped && overflows ? " comment__body--faded" : "");
+
+  return (
+    <>
+      <p ref={ref} className={className}>
+        {text}
+      </p>
+      {overflows && (
+        <button type="button" className="comment__more" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
+    </>
+  );
 }
 
 const Comment = memo(function Comment({ c }: { c: CommentView }) {
@@ -301,6 +344,14 @@ const Comment = memo(function Comment({ c }: { c: CommentView }) {
       <div className="comment__main">
         <div className="comment__head">
           <span className="comment__author">{c.author}</span>
+          {c.chatty && (
+            <span
+              className="chatty"
+              title={`${c.chatty.count} messages in the last ${c.chatty.windowMin} min`}
+            >
+              🗣 {c.chatty.count} in {c.chatty.windowMin}m
+            </span>
+          )}
           {c.isTopComment && <span className="tag tag--top">★ Top</span>}
           {c.isPinned && <span className="tag tag--pin">Pinned</span>}
           {c.isEdited && <span className="comment__edited">edited</span>}
@@ -322,7 +373,7 @@ const Comment = memo(function Comment({ c }: { c: CommentView }) {
           </button>
         )}
 
-        <p className="comment__body">{c.body.trim()}</p>
+        <CommentBody text={c.body.trim()} />
 
         <div className="comment__foot">
           {c.likes > 0 && <span className="stat stat--like">♥ {c.likes}</span>}
@@ -444,6 +495,25 @@ function App() {
   // Attribute a reply to its thread root's body only when the root is in view
   // and its author matches — otherwise the quote could mislabel a sibling reply.
   const views: CommentView[] = useMemo(() => {
+    const CHATTY_WINDOW_MS = 5 * 60_000;
+    const CHATTY_MIN = 3;
+
+    // Per author: post times within the recent window, to flag frequent posters.
+    const byAuthor = new Map<string, number[]>();
+    for (const c of comments) {
+      const t = new Date(c.postedAt).getTime();
+      if (now - t > CHATTY_WINDOW_MS) continue;
+      const times = byAuthor.get(c.author);
+      if (times) times.push(t);
+      else byAuthor.set(c.author, [t]);
+    }
+    const chattyByAuthor = new Map<string, { count: number; windowMin: number }>();
+    for (const [author, times] of byAuthor) {
+      if (times.length < CHATTY_MIN) continue;
+      const windowMin = Math.max(1, Math.round((now - Math.min(...times)) / 60_000));
+      chattyByAuthor.set(author, { count: times.length, windowMin });
+    }
+
     const byUuid = new Map(comments.map((c) => [c.uuid, c]));
     return comments.map((c) => {
       const timeMs = new Date(c.postedAt).getTime();
@@ -452,7 +522,13 @@ function App() {
         const root = byUuid.get(c.threadUuid);
         if (root && root.author === c.replyingTo) parentQuote = root.body.trim().replace(/\s+/g, " ");
       }
-      return { ...c, timeMs, timeLabel: relativeTime(timeMs, now), parentQuote };
+      return {
+        ...c,
+        timeMs,
+        timeLabel: relativeTime(timeMs, now),
+        parentQuote,
+        chatty: chattyByAuthor.get(c.author),
+      };
     });
   }, [comments, now]);
 

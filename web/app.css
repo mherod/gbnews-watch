@@ -520,6 +520,48 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* Clamp long bodies to ~6 lines; the expand button toggles this off. max-height
+   (not -webkit-line-clamp) so scrollHeight vs clientHeight stays measurable. */
+.comment__body--clamped {
+  max-height: 9.3em; /* ~6 lines at 1.55 line-height */
+  overflow: hidden;
+}
+
+/* Fade the cut-off edge only when the body is actually truncated. */
+.comment__body--faded {
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent);
+}
+
+.comment__more {
+  margin-top: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.comment__more:hover {
+  background: var(--accent-soft);
+}
+
+.chatty {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: default;
+}
+
 .comment__foot {
   display: flex;
   gap: 12px;
