@@ -5,7 +5,7 @@
   "scripts": {
     "build": "bun build web/index.html --outdir public",
     "start": "bun run server.ts",
-    "dev": "bun run --hot server.ts",
+    "dev": "bun run --hot dev.ts",
     "cli": "bun run cli.ts",
     "typecheck": "tsc --noEmit"
   },

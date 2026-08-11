@@ -1,10 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "bun",
   "bunVersion": "1.x",
-  "regions": ["lhr1"],
-  "functions": {
-    "server.ts": {
-      "maxDuration": 300
-    }
-  }
+  "regions": ["lhr1"]
 }

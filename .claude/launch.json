@@ -4,7 +4,7 @@
     {
       "name": "gbnews-watch",
       "runtimeExecutable": "bun",
-      "runtimeArgs": ["run", "--hot", "server.ts"],
+      "runtimeArgs": ["run", "--hot", "dev.ts"],
       "port": 3000,
       "autoPort": true
     }
