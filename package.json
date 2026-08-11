@@ -3,7 +3,7 @@
   "module": "server.ts",
   "type": "module",
   "scripts": {
-    "build": "bun build web/index.html --outdir public",
+    "build": "bun bundle-frontend.ts",
     "start": "bun run server.ts",
     "dev": "bun run --hot dev.ts",
     "cli": "bun run cli.ts",

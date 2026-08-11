@@ -6,20 +6,37 @@ const TOPIC = "comments";
 export interface CommentServerOptions {
   /** Anything that yields stream events — the live feed, or a stub in tests. */
   source: AsyncIterable<StreamEvent>;
-  /** The bundled HTML entry point served at `/` (a `.html` import, or a Response in tests). */
-  html: Bun.HTMLBundle | Response;
+  /**
+   * The `/` route value: a Bun HTML bundle (dev — enables HMR) or a plain
+   * Response (tests). Mutually exclusive with `assets`; exactly one is given.
+   */
+  html?: Bun.HTMLBundle | Response;
+  /**
+   * Built frontend inlined into the function (prod). Served from memory for `/`
+   * and every asset path, because the Bun framework builder routes all requests
+   * here and publishes nothing to the CDN.
+   */
+  assets?: FrontendAssets;
   port?: number;
   /** How many comments a freshly-opened tab is handed. */
   snapshotSize?: number;
   containerUuid?: string;
   /** Hot reload and console forwarding. Off in production. */
   dev?: boolean;
-  /**
-   * Directory of built frontend assets to serve as a fallback. On Vercel the
-   * CDN answers these paths before the function is invoked; this exists for
-   * local production-parity runs and non-Vercel hosts.
-   */
-  publicDir?: string;
+}
+
+export interface Asset {
+  type: string;
+  base64: string;
+}
+
+/** Built frontend files keyed by request path (e.g. "/index.html"). */
+export type FrontendAssets = Record<string, Asset>;
+
+function assetResponse(asset: Asset): Response {
+  return new Response(Buffer.from(asset.base64, "base64"), {
+    headers: { "Content-Type": asset.type, "Cache-Control": "public, max-age=3600" },
+  });
 }
 
 /**
@@ -52,15 +69,7 @@ function toWire(comment: StreamedComment): WireComment {
  * websocket without waiting on live GB News traffic.
  */
 export function startCommentServer(options: CommentServerOptions): CommentServer {
-  const {
-    source,
-    html,
-    port = 3000,
-    snapshotSize = 40,
-    containerUuid,
-    dev = false,
-    publicDir,
-  } = options;
+  const { source, html, assets, port = 3000, snapshotSize = 40, containerUuid, dev = false } = options;
 
   const recent: WireComment[] = [];
   /**
@@ -86,25 +95,32 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
     server.publish(TOPIC, JSON.stringify(message));
   }
 
+  // In dev, `html` is a Bun bundle mounted at "/" so HMR works. In prod there is
+  // no bundle — "/" serves index.html from the inlined assets map.
+  const indexRoute =
+    html ??
+    (() => {
+      const asset = assets?.["/index.html"];
+      return asset ? assetResponse(asset) : new Response("Frontend not built", { status: 503 });
+    });
+
   const server = Bun.serve({
     port,
     routes: {
-      "/": html,
+      "/": indexRoute,
       "/api/health": () =>
         Response.json({ ok: true, container: containerUuid, buffered: recent.length, comments: recent, ...stats() }),
-
     },
-    async fetch(request, server) {
+    fetch(request, server) {
       const { pathname } = new URL(request.url);
       if (pathname === "/ws") {
         return server.upgrade(request)
           ? undefined
           : new Response("Expected a websocket", { status: 426 });
       }
-      // Static fallback for hosts without a CDN layer in front of the server.
-      if (publicDir && request.method === "GET" && !pathname.includes("..")) {
-        const asset = Bun.file(`${publicDir}${pathname === "/" ? "/index.html" : pathname}`);
-        if (await asset.exists()) return new Response(asset);
+      if (assets && request.method === "GET") {
+        const asset = assets[pathname === "/" ? "/index.html" : pathname];
+        if (asset) return assetResponse(asset);
       }
       return new Response("Not found", { status: 404 });
     },

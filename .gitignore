@@ -5,6 +5,7 @@ node_modules
 out
 dist
 public
+web/frontend-assets.generated.ts
 *.tgz
 
 # vercel link + local build output
