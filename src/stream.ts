@@ -1,11 +1,11 @@
-import { AsyncQueue, subscribeComments } from "./realtime.ts";
+import { AsyncQueue, subscribeComments } from "./realtime";
 import {
   listComments,
   listReplies,
   UserDirectory,
   type ContainerRef,
   type VfComment,
-} from "./viafoura.ts";
+} from "./viafoura";
 
 export interface StreamedComment {
   kind: "comment" | "reply";

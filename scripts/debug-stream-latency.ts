@@ -7,8 +7,8 @@
  */
 
 import { parseArgs } from "node:util";
-import { streamComments } from "../src/stream.ts";
-import { GBNEWS_LIVE_CONTAINER_UUID, GBNEWS_SECTION_UUID } from "../src/viafoura.ts";
+import { streamComments } from "../src/stream";
+import { GBNEWS_LIVE_CONTAINER_UUID, GBNEWS_SECTION_UUID } from "../src/viafoura";
 
 const { values } = parseArgs({
   options: {

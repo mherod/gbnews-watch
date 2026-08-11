@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import type { ServerMessage, Stats, WireComment } from "../src/wire.ts";
+import type { ServerMessage, Stats, WireComment } from "../src/wire";
 
 const FEED_LIMIT = 150;
 

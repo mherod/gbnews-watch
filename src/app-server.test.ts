@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { startCommentServer } from "./app-server.ts";
-import type { StreamEvent, StreamedComment } from "./stream.ts";
-import type { ServerMessage } from "./wire.ts";
+import { startCommentServer } from "./app-server";
+import type { StreamEvent, StreamedComment } from "./stream";
+import type { ServerMessage } from "./wire";
 
 function comment(overrides: Partial<StreamedComment> = {}): StreamedComment {
   return {

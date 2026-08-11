@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
 import { parseArgs } from "node:util";
-import { streamComments, type StreamedComment } from "./src/stream.ts";
+import { streamComments, type StreamedComment } from "./src/stream";
 import {
   containerIdFromPage,
   resolveContainerId,
   GBNEWS_LIVE_CONTAINER_UUID,
   GBNEWS_SECTION_UUID,
-} from "./src/viafoura.ts";
+} from "./src/viafoura";
 
 const { values } = parseArgs({
   options: {

@@ -1,5 +1,5 @@
-import type { StreamEvent, StreamedComment } from "./stream.ts";
-import type { ServerMessage, Stats, WireComment } from "./wire.ts";
+import type { StreamEvent, StreamedComment } from "./stream";
+import type { ServerMessage, Stats, WireComment } from "./wire";
 
 const TOPIC = "comments";
 
@@ -14,6 +14,12 @@ export interface CommentServerOptions {
   containerUuid?: string;
   /** Hot reload and console forwarding. Off in production. */
   dev?: boolean;
+  /**
+   * Directory of built frontend assets to serve as a fallback. On Vercel the
+   * CDN answers these paths before the function is invoked; this exists for
+   * local production-parity runs and non-Vercel hosts.
+   */
+  publicDir?: string;
 }
 
 /**
@@ -46,7 +52,15 @@ function toWire(comment: StreamedComment): WireComment {
  * websocket without waiting on live GB News traffic.
  */
 export function startCommentServer(options: CommentServerOptions): CommentServer {
-  const { source, html, port = 3000, snapshotSize = 40, containerUuid, dev = false } = options;
+  const {
+    source,
+    html,
+    port = 3000,
+    snapshotSize = 40,
+    containerUuid,
+    dev = false,
+    publicDir,
+  } = options;
 
   const recent: WireComment[] = [];
   /**
@@ -80,11 +94,17 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
         Response.json({ ok: true, container: containerUuid, buffered: recent.length, comments: recent, ...stats() }),
 
     },
-    fetch(request, server) {
-      if (new URL(request.url).pathname === "/ws") {
+    async fetch(request, server) {
+      const { pathname } = new URL(request.url);
+      if (pathname === "/ws") {
         return server.upgrade(request)
           ? undefined
           : new Response("Expected a websocket", { status: 426 });
+      }
+      // Static fallback for hosts without a CDN layer in front of the server.
+      if (publicDir && request.method === "GET" && !pathname.includes("..")) {
+        const asset = Bun.file(`${publicDir}${pathname === "/" ? "/index.html" : pathname}`);
+        if (await asset.exists()) return new Response(asset);
       }
       return new Response("Not found", { status: 404 });
     },

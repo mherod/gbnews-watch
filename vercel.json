@@ -3,15 +3,8 @@
   "bunVersion": "1.x",
   "regions": ["lhr1"],
   "functions": {
-    "api/index.ts": {
+    "server.ts": {
       "maxDuration": 300
     }
-  },
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/api/index"
-    }
-  ]
+  }
 }
-

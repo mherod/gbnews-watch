@@ -1,4 +1,4 @@
-import type { StreamedComment } from "./stream.ts";
+import type { StreamedComment } from "./stream";
 
 /** A comment as it arrives over the browser socket — `postedAt` is JSON, so a string. */
 export type WireComment = Omit<StreamedComment, "postedAt"> & { postedAt: string };

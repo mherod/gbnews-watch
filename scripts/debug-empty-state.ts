@@ -6,8 +6,8 @@
  */
 
 import index from "../web/index.html";
-import { startCommentServer } from "../src/app-server.ts";
-import type { StreamEvent } from "../src/stream.ts";
+import { startCommentServer } from "../src/app-server";
+import type { StreamEvent } from "../src/stream";
 
 async function* silence(): AsyncGenerator<StreamEvent> {
   yield { type: "primed", tracking: 0 };

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { parseContainerId } from "./viafoura.ts";
-import { RecentSet } from "./stream.ts";
+import { parseContainerId } from "./viafoura";
+import { RecentSet } from "./stream";
 
 test("parseContainerId reads the vf:container_id meta tag", () => {
   const html = `<head><meta name="vf:container_id" content="2658636820"/></head>`;

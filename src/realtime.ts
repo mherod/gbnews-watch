@@ -1,4 +1,4 @@
-import type { ContainerRef, VfComment } from "./viafoura.ts";
+import type { ContainerRef, VfComment } from "./viafoura";
 
 const EVENT_FEED = "wss://realtimeeventfeeds.viafoura.co/eventfeed";
 
@@ -95,11 +95,12 @@ export async function* subscribeComments(
   function connect() {
     if (stopped) return;
     const subscriptionId = crypto.randomUUID();
-    socket = new WebSocket(`${EVENT_FEED}?site_uuid=${sectionUuid}`);
+    const ws = new WebSocket(`${EVENT_FEED}?site_uuid=${sectionUuid}`);
+    socket = ws;
 
-    socket.addEventListener("open", () => {
+    ws.addEventListener("open", () => {
       failures = 0;
-      socket?.send(
+      ws.send(
         JSON.stringify({
           type: "subscribe",
           subscription_id: subscriptionId,
@@ -113,12 +114,12 @@ export async function* subscribeComments(
         }),
       );
       keepAlive = setInterval(() => {
-        if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "keep-alive" }));
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "keep-alive" }));
       }, KEEP_ALIVE_MS);
       queue.push({ type: "open" });
     });
 
-    socket.addEventListener("message", (event) => {
+    ws.addEventListener("message", (event) => {
       if (typeof event.data !== "string") return;
       let frame: EventFrame;
       try {
@@ -139,8 +140,8 @@ export async function* subscribeComments(
       setTimeout(connect, retryInMs);
     };
 
-    socket.addEventListener("close", (event) => reconnect(event.code, event.reason || ""));
-    socket.addEventListener("error", () => socket?.close());
+    ws.addEventListener("close", (event) => reconnect(event.code, event.reason || ""));
+    ws.addEventListener("error", () => ws.close());
   }
 
   connect();

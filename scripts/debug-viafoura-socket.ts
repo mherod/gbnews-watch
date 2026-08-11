@@ -13,7 +13,7 @@
  */
 
 import { parseArgs } from "node:util";
-import { GBNEWS_LIVE_CONTAINER_UUID, GBNEWS_SECTION_UUID } from "../src/viafoura.ts";
+import { GBNEWS_LIVE_CONTAINER_UUID, GBNEWS_SECTION_UUID } from "../src/viafoura";
 
 const { values } = parseArgs({
   options: {
