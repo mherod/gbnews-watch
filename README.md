@@ -66,18 +66,31 @@ the Viafoura read APIs are public.
 
 ```json
 {
+  "framework": "bun",
   "bunVersion": "1.x",
-  "regions": ["lhr1"],
-  "functions": { "api/index.ts": { "maxDuration": 300 } },
-  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+  "regions": ["lhr1"]
 }
 ```
 
-`bunVersion` puts Functions on the Bun runtime so `Bun.serve` and its websockets
-work as they do locally. Vercel detects `api/index.ts` as the serverless function
-entrypoint and routes everything to it via the rewrite rule.
+`framework: bun` deploys the app as a Bun **backend**: Vercel detects `server.ts`
+as the entrypoint, runs it on the Bun runtime so `Bun.serve` and its websockets
+work exactly as they do locally, and routes every request — including `/ws`
+upgrades — to it.
 
-Three things behave differently in production:
+That backend model has one sharp edge worth knowing, because it cost two failed
+deploys to find:
+
+- **The function serves the frontend itself.** A Bun backend publishes nothing
+  to the CDN and `includeFiles` is ignored for it, so a `public/` directory
+  never reaches the function — assets 404. Instead, `bun run build`
+  (`bundle-frontend.ts`) inlines the built HTML/CSS/JS into
+  `web/frontend-assets.generated.ts`, which `server.ts` imports and serves from
+  memory. That module is git-ignored and rebuilt on every deploy.
+- **`server.ts` must never import `web/index.html`.** Vercel compiles the
+  entrypoint with rolldown, which can't parse Bun's HTML-module import. That
+  import — and the HMR it powers — lives in `dev.ts` (`bun run dev`) instead.
+
+Three things also behave differently at runtime in production:
 
 - **One subscription per instance, not per deployment.** Locally a single
   process holds one upstream socket for every tab. Vercel scales instances
