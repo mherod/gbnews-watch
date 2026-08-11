@@ -11,7 +11,7 @@ import {
 import { createRoot } from "react-dom/client";
 
 import type { ServerMessage, Stats, WireComment } from "../src/wire";
-import { computeTrends, termRegex, type Trend } from "../src/trending";
+import { computeTrends, mergeStickyTrends, termRegex, type StickyEntry, type Trend } from "../src/trending";
 
 const FEED_LIMIT = 150;
 /** Rolling window the activity sparkline covers. */
@@ -219,13 +219,23 @@ function useNow(intervalMs = 1000) {
   return now;
 }
 
-/** Recomputes trending words every few seconds, off the render/time path. */
+/**
+ * Recomputes trending words every few seconds, off the render/time path. A
+ * topic stays in the row for a dwell time after it stops trending (so the bar
+ * doesn't flicker) while fresh topics still lead — via a sticky map kept in a
+ * ref across ticks.
+ */
 function useTrends(comments: WireComment[]) {
   const [trends, setTrends] = useState<Trend[]>([]);
   const latest = useRef(comments);
   latest.current = comments;
+  const sticky = useRef<Map<string, StickyEntry>>(new Map());
   useEffect(() => {
-    const compute = () => setTrends(computeTrends(latest.current, Date.now()));
+    const compute = () => {
+      const now = Date.now();
+      const fresh = computeTrends(latest.current, now, { limit: 8 });
+      setTrends(mergeStickyTrends(fresh, sticky.current, now, { display: 6 }));
+    };
     compute();
     const timer = setInterval(compute, 4000);
     return () => clearInterval(timer);
