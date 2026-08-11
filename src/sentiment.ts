@@ -31,6 +31,28 @@ export const LEXICON: Record<string, number> = {
   rot: -2, rotten: -2, enough: -1, damning: -2, insane: -2,
 };
 
+/**
+ * Emoji are tidy sentiment signals — often clearer than the words around them.
+ * Keyed by the bare glyph (variation selectors and skin tones are stripped
+ * before lookup).
+ */
+export const EMOJI_LEXICON: Record<string, number> = {
+  "😂": 2, "🤣": 2, "😁": 2, "😄": 2, "😆": 2, "😅": 1, "😊": 2, "🙂": 1, "😉": 1, "😍": 3,
+  "🥰": 3, "😘": 2, "😎": 2, "🤩": 3, "🥳": 3, "👏": 2, "👍": 2, "🙌": 2, "💪": 2, "👌": 2,
+  "❤": 3, "❤️": 3, "💙": 2, "💚": 2, "🧡": 2, "🙏": 1, "✌": 1, "🎉": 2, "😇": 2, "🤗": 2,
+  "😠": -2, "😡": -3, "🤬": -3, "😤": -2, "👎": -2, "😢": -2, "😭": -2, "😞": -2, "😔": -2,
+  "😟": -1, "😕": -1, "🙄": -2, "😒": -2, "🤮": -3, "🤢": -2, "💩": -3, "🤡": -2, "😱": -2,
+  "😨": -2, "😰": -1, "🤦": -2, "🤷": -1, "😐": -1, "😑": -1, "🖕": -3, "😬": -1, "🥴": -1,
+};
+
+const EMOJI_GRAPHEME = /\p{Extended_Pictographic}/u;
+const moodSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Strip variation selectors and skin-tone modifiers so a glyph matches the lexicon. */
+function bareEmoji(grapheme: string): string {
+  return grapheme.replace(/[\u{FE0F}\u{1F3FB}-\u{1F3FF}]/gu, "");
+}
+
 export interface Mood {
   /** Mean sentiment across scored comments, roughly -3 … +3. */
   score: number;
@@ -49,7 +71,12 @@ export interface Mood {
 
 const WORD = /[\p{L}][\p{L}']*/gu;
 
-/** Net sentiment of one comment, or null if it has no lexicon words. */
+/** Sentiment value of a single emoji glyph, if known. */
+export function emojiSentiment(grapheme: string): number | undefined {
+  return EMOJI_LEXICON[grapheme] ?? EMOJI_LEXICON[bareEmoji(grapheme)];
+}
+
+/** Net sentiment of one comment (words + emoji), or null if it carries none. */
 export function scoreText(text: string): number | null {
   let sum = 0;
   let hits = 0;
@@ -66,6 +93,15 @@ export function scoreText(text: string): number | null {
       hits += 1;
     }
     negate = false;
+  }
+  // Emoji are strong, unambiguous signals — count each occurrence.
+  for (const { segment } of moodSegmenter.segment(text)) {
+    if (!EMOJI_GRAPHEME.test(segment)) continue;
+    const value = emojiSentiment(segment);
+    if (value !== undefined) {
+      sum += value;
+      hits += 1;
+    }
   }
   return hits === 0 ? null : sum / hits;
 }

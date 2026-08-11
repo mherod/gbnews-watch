@@ -21,6 +21,12 @@ test("negation flips the sign", () => {
   expect(scoreText("this isn't terrible")!).toBeGreaterThan(0);
 });
 
+test("emoji count toward sentiment", () => {
+  expect(scoreText("well 🤬")!).toBeLessThan(0); // angry emoji
+  expect(scoreText("👏")!).toBeGreaterThan(0); // no words, emoji only
+  expect(scoreText("hmm 🤣")!).toBeGreaterThan(0);
+});
+
 test("roomMood reads a heated room", () => {
   const comments = [
     at("absolute disgrace"),

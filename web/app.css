@@ -636,6 +636,24 @@ body {
   background: color-mix(in srgb, var(--warn) 45%, transparent);
 }
 
+/* Sentiment tint — where the heat (or warmth) is. */
+.sent {
+  border-radius: 3px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.sent--neg {
+  background: color-mix(in srgb, #ef4444 20%, transparent);
+  color: color-mix(in srgb, #ef4444 55%, var(--ink));
+}
+
+.sent--pos {
+  background: color-mix(in srgb, var(--live) 20%, transparent);
+  color: color-mix(in srgb, var(--live) 45%, var(--ink));
+}
+
 .comment__more {
   margin-top: 6px;
   padding: 2px 8px;

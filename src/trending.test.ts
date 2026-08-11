@@ -117,6 +117,18 @@ test("boosts a proper noun over a generic word of equal breadth", () => {
   expect(trends[0]?.word.toLowerCase()).toBe("burnham");
 });
 
+test("merges an overlapping proper-noun bigram and unigram into one topic", () => {
+  const comments = [
+    ...Array.from({ length: 8 }, (_, i) => c("Stadlen", { author: `u${i}` })),
+    ...Array.from({ length: 3 }, (_, i) => c("Matthew Stadlen", { author: `m${i}` })),
+  ];
+  const trends = computeTrends(comments, NOW);
+  const stadlen = trends.filter((t) => t.word.toLowerCase().includes("stadlen"));
+  expect(stadlen).toHaveLength(1); // one topic, not two chips
+  expect(stadlen[0]!.word).toBe("Matthew Stadlen"); // upgraded to the full name
+  expect(stadlen[0]!.recent).toBeGreaterThanOrEqual(8); // carries the dominant count
+});
+
 test("strips a contraction so it becomes a stopword", () => {
   const trends = computeTrends(
     [c("there's a problem", { author: "a" }), c("there's a problem", { author: "b" })],

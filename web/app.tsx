@@ -14,7 +14,7 @@ import { createRoot } from "react-dom/client";
 
 import type { ServerMessage, Stats, WireComment } from "../src/wire";
 import { computeTrends, mergeStickyTrends, termRegex, type StickyEntry, type Trend } from "../src/trending";
-import { roomMood, type Mood } from "../src/sentiment";
+import { roomMood, emojiSentiment, LEXICON, type Mood } from "../src/sentiment";
 import { topEmoji, type EmojiCount } from "../src/emoji";
 
 const FEED_LIMIT = 150;
@@ -298,47 +298,106 @@ interface CommentView extends WireComment {
   chatty?: { count: number; windowMin: number };
 }
 
-/** Renders `text` with occurrences of `terms` wrapped in clickable <mark>s. */
+// A regex over the whole sentiment lexicon, built once.
+const SENTIMENT_RE = new RegExp(
+  `\\b(${Object.keys(LEXICON)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|")})\\b`,
+  "gi",
+);
+const hlSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+type Span = { start: number; end: number; kind: "trend" | "filter" | "pos" | "neg"; text: string };
+// Trends are interactive, so they win any overlap; sentiment tints fill the gaps.
+const SPAN_PRIORITY: Record<Span["kind"], number> = { filter: 0, trend: 1, neg: 2, pos: 2 };
+
+/**
+ * Renders a comment body with two kinds of highlight: trending terms (accent,
+ * clickable to filter) and sentiment — negative words/emoji in red, positive in
+ * green — so you can see at a glance where the heat is.
+ */
 function highlightBody(
   text: string,
   terms: readonly string[],
   filterLower: string | null,
   onTerm: (term: string) => void,
 ): ReactNode {
+  const spans: Span[] = [];
+
+  // Trend terms (phrases longest-first so they win over their parts).
   const escaped = [...terms]
     .filter((t) => t.length >= 3)
-    .sort((a, b) => b.length - a.length) // longest first, so phrases win over their parts
+    .sort((a, b) => b.length - a.length)
     .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  if (escaped.length === 0) return text;
-
-  let re: RegExp;
-  try {
-    re = new RegExp(`\\b(${escaped.join("|")})\\b`, "gi");
-  } catch {
-    return text;
+  if (escaped.length > 0) {
+    try {
+      const re = new RegExp(`\\b(${escaped.join("|")})\\b`, "gi");
+      for (let m = re.exec(text); m !== null; m = re.exec(text)) {
+        const isFilter = filterLower !== null && m[0].toLowerCase() === filterLower;
+        spans.push({ start: m.index, end: m.index + m[0].length, kind: isFilter ? "filter" : "trend", text: m[0] });
+        if (m.index === re.lastIndex) re.lastIndex++;
+      }
+    } catch {
+      /* bad term → skip trend highlighting */
+    }
   }
+
+  // Sentiment words.
+  SENTIMENT_RE.lastIndex = 0;
+  for (let m = SENTIMENT_RE.exec(text); m !== null; m = SENTIMENT_RE.exec(text)) {
+    const value = LEXICON[m[0].toLowerCase()];
+    if (value !== undefined) {
+      spans.push({ start: m.index, end: m.index + m[0].length, kind: value < 0 ? "neg" : "pos", text: m[0] });
+    }
+    if (m.index === SENTIMENT_RE.lastIndex) SENTIMENT_RE.lastIndex++;
+  }
+
+  // Sentiment emoji.
+  let idx = 0;
+  for (const { segment } of hlSegmenter.segment(text)) {
+    const value = emojiSentiment(segment);
+    if (value !== undefined) {
+      spans.push({ start: idx, end: idx + segment.length, kind: value < 0 ? "neg" : "pos", text: segment });
+    }
+    idx += segment.length;
+  }
+
+  if (spans.length === 0) return text;
+
+  // Highest-priority spans first, then drop any that overlap an accepted one.
+  spans.sort((a, b) => SPAN_PRIORITY[a.kind] - SPAN_PRIORITY[b.kind] || a.start - b.start);
+  const chosen: Span[] = [];
+  for (const s of spans) {
+    if (!chosen.some((c) => s.start < c.end && c.start < s.end)) chosen.push(s);
+  }
+  chosen.sort((a, b) => a.start - b.start);
 
   const nodes: ReactNode[] = [];
   let last = 0;
   let key = 0;
-  for (let m = re.exec(text); m !== null; m = re.exec(text)) {
-    if (m.index > last) nodes.push(text.slice(last, m.index));
-    const word = m[0];
-    const isFilter = filterLower !== null && word.toLowerCase() === filterLower;
-    nodes.push(
-      <mark
-        key={key++}
-        className={isFilter ? "hl hl--filter" : "hl"}
-        onClick={(e) => {
-          e.stopPropagation();
-          onTerm(word);
-        }}
-      >
-        {word}
-      </mark>,
-    );
-    last = m.index + word.length;
-    if (m.index === re.lastIndex) re.lastIndex++; // guard against zero-width matches
+  for (const s of chosen) {
+    if (s.start > last) nodes.push(text.slice(last, s.start));
+    if (s.kind === "trend" || s.kind === "filter") {
+      nodes.push(
+        <mark
+          key={key++}
+          className={s.kind === "filter" ? "hl hl--filter" : "hl"}
+          onClick={(e) => {
+            e.stopPropagation();
+            onTerm(s.text);
+          }}
+        >
+          {s.text}
+        </mark>,
+      );
+    } else {
+      nodes.push(
+        <span key={key++} className={s.kind === "neg" ? "sent sent--neg" : "sent sent--pos"}>
+          {s.text}
+        </span>,
+      );
+    }
+    last = s.end;
   }
   if (last < text.length) nodes.push(text.slice(last));
   return nodes;

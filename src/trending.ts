@@ -209,14 +209,28 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   const candidates: Trend[] = [];
   const consumed = new Set<string>();
 
-  // Phrases first, boosted; suppress a bare word when the phrase covers most of it.
+  // Phrases first, boosted. A bare word is dropped when the phrase covers most of
+  // it; and a proper-noun phrase *absorbs and upgrades* a more-popular bare part
+  // — so "Stadlen" (20) and "Matthew Stadlen" (4) become one "Matthew Stadlen"
+  // topic carrying the bigger count, not two chips for the same person.
   for (const [key, s] of bi) {
     if (s.recent < 2) continue;
     const parts = key.split(" ");
-    candidates.push(toTrend(key, s, 1.6, parts));
+    const isName = s.caps / s.recent >= 0.6;
+    let recent = s.recent;
+    let sc = score(s) * 1.6;
     for (const part of parts) {
-      if (s.recent >= 0.6 * (uni.get(part)?.recent ?? 0)) consumed.add(part);
+      const u = uni.get(part);
+      if (!u) continue;
+      if (s.recent >= 0.6 * u.recent) {
+        consumed.add(part); // the phrase is the dominant form of this word
+      } else if (isName && u.recent >= s.recent) {
+        consumed.add(part); // same person, shorter name → fold it in and upgrade
+        recent = Math.max(recent, u.recent);
+        sc = Math.max(sc, score(u));
+      }
     }
+    candidates.push({ word: bestForm(s.forms) ?? key, recent, prior: s.prior, score: sc, parts });
   }
 
   const singles: Trend[] = [];
