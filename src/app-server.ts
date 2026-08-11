@@ -77,7 +77,8 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
     routes: {
       "/": html,
       "/api/health": () =>
-        Response.json({ ok: true, container: containerUuid, buffered: recent.length, ...stats() }),
+        Response.json({ ok: true, container: containerUuid, buffered: recent.length, comments: recent, ...stats() }),
+
     },
     fetch(request, server) {
       if (new URL(request.url).pathname === "/ws") {

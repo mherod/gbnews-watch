@@ -1,10 +1,11 @@
 {
   "name": "gbnews-watch",
-  "module": "index.ts",
+  "module": "server.ts",
   "type": "module",
   "scripts": {
-    "start": "bun run index.ts",
-    "dev": "bun run --hot index.ts",
+    "build": "bun build web/index.html --outdir public",
+    "start": "bun run server.ts",
+    "dev": "bun run --hot server.ts",
     "cli": "bun run cli.ts",
     "typecheck": "tsc --noEmit"
   },

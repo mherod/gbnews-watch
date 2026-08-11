@@ -40,7 +40,27 @@ function useCommentFeed() {
   useEffect(() => {
     let socket: WebSocket | undefined;
     let retry: ReturnType<typeof setTimeout> | undefined;
+    let pollInterval: ReturnType<typeof setInterval> | undefined;
     let closed = false;
+
+    const pollHealth = async () => {
+      try {
+        const res = await fetch("/api/health");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.comments) setComments(data.comments.slice(0, FEED_LIMIT));
+          setStats({
+            total: data.total ?? 0,
+            perMinute: data.perMinute ?? 0,
+            upstream: data.upstream ?? "live",
+            clients: data.clients ?? 1,
+          });
+          setConnected(true);
+        }
+      } catch {
+        // network error during poll
+      }
+    };
 
     const connect = () => {
       if (closed) return;
@@ -50,6 +70,7 @@ function useCommentFeed() {
       socket.onopen = () => {
         retries.current = 0;
         setConnected(true);
+        if (pollInterval) clearInterval(pollInterval);
       };
 
       socket.onmessage = (event) => {
@@ -64,6 +85,10 @@ function useCommentFeed() {
       socket.onclose = () => {
         setConnected(false);
         if (closed) return;
+        if (!pollInterval) {
+          pollHealth();
+          pollInterval = setInterval(pollHealth, 3000);
+        }
         retry = setTimeout(connect, Math.min(8000, 500 * 2 ** retries.current++));
       };
 
@@ -71,12 +96,14 @@ function useCommentFeed() {
     };
 
     connect();
+    pollHealth();
+    pollInterval = setInterval(pollHealth, 3000);
+
     return () => {
       closed = true;
       clearTimeout(retry);
+      if (pollInterval) clearInterval(pollInterval);
       if (!socket) return;
-      // Don't let our own teardown schedule a reconnect, and don't abort a
-      // handshake mid-flight — StrictMode's double-mount does exactly that.
       socket.onclose = null;
       const target = socket;
       if (target.readyState === WebSocket.CONNECTING) {
