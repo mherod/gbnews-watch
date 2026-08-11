@@ -37,6 +37,10 @@ const result = await Bun.build({
   outdir: OUT_DIR,
   minify: true,
   sourcemap: "none",
+  // Compile React's production build: smaller, no dev warnings, and no
+  // StrictMode double-mount (which would double-open the websocket and inflate
+  // the live-viewer count).
+  define: { "process.env.NODE_ENV": JSON.stringify("production") },
 });
 
 if (!result.success) {
