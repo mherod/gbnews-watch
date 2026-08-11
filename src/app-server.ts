@@ -33,9 +33,16 @@ export interface Asset {
 /** Built frontend files keyed by request path (e.g. "/index.html"). */
 export type FrontendAssets = Record<string, Asset>;
 
-function assetResponse(asset: Asset): Response {
+// index.html carries the hashed asset references, so it must revalidate every
+// load or a redeploy leaves repeat visitors pointing at a stale bundle. The
+// hashed assets themselves never change under a given name, so cache them hard.
+const HTML_CACHE = "no-cache";
+const ASSET_CACHE = "public, max-age=31536000, immutable";
+
+function assetResponse(asset: Asset, path: string): Response {
+  const cache = path === "/" || path === "/index.html" ? HTML_CACHE : ASSET_CACHE;
   return new Response(Buffer.from(asset.base64, "base64"), {
-    headers: { "Content-Type": asset.type, "Cache-Control": "public, max-age=3600" },
+    headers: { "Content-Type": asset.type, "Cache-Control": cache },
   });
 }
 
@@ -101,7 +108,7 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
     html ??
     (() => {
       const asset = assets?.["/index.html"];
-      return asset ? assetResponse(asset) : new Response("Frontend not built", { status: 503 });
+      return asset ? assetResponse(asset, "/index.html") : new Response("Frontend not built", { status: 503 });
     });
 
   const server = Bun.serve({
@@ -119,8 +126,9 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
           : new Response("Expected a websocket", { status: 426 });
       }
       if (assets && request.method === "GET") {
-        const asset = assets[pathname === "/" ? "/index.html" : pathname];
-        if (asset) return assetResponse(asset);
+        const key = pathname === "/" ? "/index.html" : pathname;
+        const asset = assets[key];
+        if (asset) return assetResponse(asset, key);
       }
       return new Response("Not found", { status: 404 });
     },
