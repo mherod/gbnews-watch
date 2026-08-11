@@ -129,6 +129,38 @@ test("merges an overlapping proper-noun bigram and unigram into one topic", () =
   expect(stadlen[0]!.recent).toBeGreaterThanOrEqual(8); // carries the dominant count
 });
 
+test("bridges a stopword gap to surface 'stop the boats'", () => {
+  const words = computeTrends(fromMany("We need to stop the boats", 3), NOW).map((t) => t.word.toLowerCase());
+  expect(words).toContain("stop the boats");
+  expect(words).not.toContain("stop"); // endpoints folded into the phrase
+  expect(words).not.toContain("boats");
+});
+
+test("a connective phrase needs more than one voice", () => {
+  const solo = Array.from({ length: 4 }, () => c("stop the boats", { author: "solo" }));
+  const words = computeTrends(solo, NOW, { minTrends: 1 }).map((t) => t.word.toLowerCase());
+  expect(words).not.toContain("stop the boats"); // one ranter can't manufacture a phrase
+});
+
+test("does not bridge a connective phrase across punctuation", () => {
+  const words = computeTrends(fromMany("stop. the boats", 3), NOW).map((t) => t.word.toLowerCase());
+  expect(words).not.toContain("stop the boats");
+});
+
+test("a consistently capitalised word outranks a sometimes-capitalised one", () => {
+  const trends = computeTrends(
+    [
+      c("Farage", { author: "a" }),
+      c("Farage", { author: "b" }),
+      c("Reform", { author: "c" }),
+      c("reform", { author: "d" }), // only capitalised half the time
+    ],
+    NOW,
+  );
+  const words = trends.map((t) => t.word.toLowerCase());
+  expect(words.indexOf("farage")).toBeLessThan(words.indexOf("reform"));
+});
+
 test("strips a contraction so it becomes a stopword", () => {
   const trends = computeTrends(
     [c("there's a problem", { author: "a" }), c("there's a problem", { author: "b" })],

@@ -148,6 +148,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
 
   const uni = new Map<string, Stat>();
   const bi = new Map<string, Stat>();
+  const conn = new Map<string, Stat>(); // two topics bridged by short stopword glue
 
   for (const c of comments) {
     const age = now - new Date(c.postedAt).getTime();
@@ -192,13 +193,61 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
         cap: isCapitalized(cur[0]) && isCapitalized(next[0]),
       });
     }
+
+    // Connective phrases: two content words bridged by 1–2 stopwords joined only
+    // by whitespace — "stop the boats", "power to the people". They slip past the
+    // adjacent-bigram net because a stopword sits between the two topics, yet the
+    // bridged substring is often the real headline. We only record the phrase
+    // formed with the *nearest* following content word so longer, noisier spans
+    // don't accumulate.
+    const seenConn = new Set<string>();
+    for (let i = 0; i + 2 < matches.length; i++) {
+      const first = matches[i]!;
+      if (!isContentWord(normalize(first[0]))) continue;
+      let bridges = 0;
+      for (let j = i + 1; j < matches.length && bridges <= 2; j++) {
+        const prev = matches[j - 1]!;
+        const cur = matches[j]!;
+        const gap = c.body.slice(prev.index! + prev[0].length, cur.index!);
+        if (!/^\s+$/.test(gap)) break; // punctuation ends the run — no phrase across it
+        const stem = normalize(cur[0]);
+        if (STOPWORDS.has(stem)) {
+          bridges += 1; // a bit of glue ("the", "our", "all")
+          continue;
+        }
+        if (!isContentWord(stem)) break;
+        if (bridges >= 1) {
+          const stems: string[] = [];
+          const forms: string[] = [];
+          for (let k = i; k <= j; k++) {
+            stems.push(normalize(matches[k]![0]));
+            forms.push(matches[k]![0]);
+          }
+          const key = stems.join(" ");
+          if (!seenConn.has(key)) {
+            seenConn.add(key);
+            record(conn, key, forms.join(" "), {
+              isRecent,
+              author,
+              weight,
+              cap: isCapitalized(first[0]) && isCapitalized(cur[0]),
+            });
+          }
+        }
+        break; // pair only with the nearest content word (bridges === 0 → bigram loop)
+      }
+    }
   }
 
   const score = (s: Stat) => {
     const base = s.authors.size + s.engagement; // people + reactions
     const surge = Math.min(3, Math.max(0.6, (s.recent + 1) / (s.prior + 1)));
-    // Proper nouns (consistently capitalised names/places) beat generic words.
-    const properNoun = s.recent >= 2 && s.caps / s.recent >= 0.6 ? 1.5 : 1;
+    // Capitalisation is a cheap hint toward proper nouns (names/places), which
+    // are usually the real topics. Graduated by how consistently the word is
+    // capitalised, so an always-capitalised "Burnham" (×1.8) beats a
+    // sometimes-capitalised word (×1.3 at the 0.6 threshold) beats a generic one.
+    const capRatio = s.recent > 0 ? s.caps / s.recent : 0;
+    const properNoun = s.recent >= 2 && capRatio >= 0.6 ? 1 + 0.8 * capRatio : 1;
     return base * surge * properNoun;
   };
   const toTrend = (key: string, s: Stat, boost: number, parts?: string[]): Trend => ({
@@ -234,6 +283,29 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       }
     }
     candidates.push({ word: bestForm(s.forms) ?? key, recent, prior: s.prior, score: sc, parts });
+  }
+
+  // Connective phrases earn a slot only when ≥2 distinct people used the exact
+  // bridged phrase AND both endpoints are themselves trending — so it surfaces
+  // "stop the boats" by uniting two hot topics rather than inventing a phrase
+  // nobody quite said. The endpoints are then folded in and the phrase carries
+  // the dominant count and a capitalisation-aware score — the same merge-and-
+  // upgrade behaviour as the proper-noun bigrams above.
+  for (const [key, s] of conn) {
+    if (s.authors.size < 2) continue;
+    const stems = key.split(" ");
+    const head = uni.get(stems[0]!);
+    const tail = uni.get(stems[stems.length - 1]!);
+    if (!head || !tail || head.recent < 2 || tail.recent < 2) continue;
+    consumed.add(stems[0]!);
+    consumed.add(stems[stems.length - 1]!);
+    candidates.push({
+      word: bestForm(s.forms) ?? key,
+      recent: Math.max(s.recent, head.recent, tail.recent),
+      prior: s.prior,
+      score: Math.max(score(s) * 1.8, score(head), score(tail)),
+      parts: [stems[0]!, stems[stems.length - 1]!],
+    });
   }
 
   const singles: Trend[] = [];
