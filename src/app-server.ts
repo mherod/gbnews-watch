@@ -1,5 +1,6 @@
 import { buildCorpus, corpusFromJson, corpusToJson, parseRssTitles, type CorpusJson } from "./corpus";
 import { emptyMemory, reinforceMemory } from "./memory";
+import { fetchSchedule, onAirAt, programmeToWire, type Programme } from "./schedule";
 import type { StreamEvent, StreamedComment } from "./stream";
 import { computeTrends } from "./trending";
 import type { ServerMessage, Stats, WireComment } from "./wire";
@@ -38,6 +39,35 @@ async function fetchCorpus(): Promise<CorpusJson> {
   return corpusInFlight;
 }
 
+/**
+ * The broadcast schedule, scraped from the /watch/schedule page (see
+ * src/schedule.ts for the provenance and its quirks). The page embeds a
+ * multi-week grid that changes editorially — on the order of hours — and
+ * weighs ~600 KB, so it is cached hard. On failure the previous schedule is
+ * served for as long as it exists; an empty grid is the safe fallback.
+ */
+const SCHEDULE_TTL_MS = 30 * 60_000;
+let scheduleCache: { at: number; data: Programme[] } | null = null;
+let scheduleInFlight: Promise<Programme[]> | null = null;
+
+async function fetchScheduleCached(): Promise<Programme[]> {
+  if (scheduleCache && Date.now() - scheduleCache.at < SCHEDULE_TTL_MS) return scheduleCache.data;
+  // Single flight so a burst of tabs doesn't fan out into parallel page hits.
+  scheduleInFlight ??= (async () => {
+    try {
+      const data = await fetchSchedule();
+      scheduleCache = { at: Date.now(), data };
+      return data;
+    } catch (error) {
+      console.warn("schedule fetch failed:", error);
+      return scheduleCache?.data ?? [];
+    } finally {
+      scheduleInFlight = null;
+    }
+  })();
+  return scheduleInFlight;
+}
+
 export interface CommentServerOptions {
   /** Anything that yields stream events — the live feed, or a stub in tests. */
   source: AsyncIterable<StreamEvent>;
@@ -62,6 +92,8 @@ export interface CommentServerOptions {
   roomTickMs?: number;
   /** Corpus supplier for the room's learning — injectable so tests stay offline. */
   roomCorpus?: () => Promise<CorpusJson>;
+  /** Schedule supplier for /api/schedule — injectable so tests stay offline. */
+  schedule?: () => Promise<Programme[]>;
 }
 
 export interface Asset {
@@ -125,6 +157,7 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
     dev = false,
     roomTickMs = 8_000,
     roomCorpus = fetchCorpus,
+    schedule = fetchScheduleCached,
   } = options;
 
   const recent: WireComment[] = [];
@@ -200,6 +233,17 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
         Response.json(await fetchCorpus(), {
           headers: { "Cache-Control": "public, max-age=300" },
         }),
+      // The broadcast grid plus what's on air this instant. `onAir` is
+      // computed per request from the cached grid, so it stays current
+      // between the (much slower) page re-fetches.
+      "/api/schedule": async () => {
+        const programmes = await schedule();
+        const now = onAirAt(programmes);
+        return Response.json(
+          { onAir: now ? programmeToWire(now) : null, programmes: programmes.map(programmeToWire) },
+          { headers: { "Cache-Control": "public, max-age=60" } },
+        );
+      },
       // The shared topic memory, minus `seen` (an internal dedupe list the
       // client has no use for). Every visitor renders this same graph.
       "/api/room": () =>

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { startCommentServer } from "./app-server";
+import type { Programme } from "./schedule";
 import type { StreamEvent, StreamedComment } from "./stream";
 import type { ServerMessage } from "./wire";
 
@@ -125,6 +126,49 @@ test("the server learns one shared topic graph and serves it at /api/room", asyn
     // equality, is what "shared" means for a living value.
     const again = await (await fetch(`http://localhost:${server.port}/api/room`)).json();
     expect(again.nodes["burnham"].weight).toBeCloseTo(room.nodes["burnham"].weight, 2);
+  } finally {
+    source.end();
+    await server.stop();
+  }
+});
+
+test("/api/schedule serves the grid, computing what's on air per request", async () => {
+  const source = controllableSource();
+  // A programme boundary 400ms out, so a second request can prove onAir is
+  // computed per request rather than snapshotted into the 30-minute cache.
+  const handover = Date.now() + 400;
+  const onNow: Programme = {
+    date: "2026-08-12",
+    start: new Date(Date.now() - 60_000),
+    end: new Date(handover),
+    title: "Currently Airing",
+    type: "Live",
+    image: null,
+    presenters: ["Anne Example"],
+    description: "d",
+    showSectionId: 1,
+    presenterSectionIds: [1],
+  };
+  const later: Programme = { ...onNow, start: new Date(handover), end: new Date(handover + 120_000), title: "Up Next" };
+  const server = startCommentServer({
+    source,
+    html: new Response("ok"),
+    port: 0,
+    schedule: async () => [onNow, later], // offline in tests
+  });
+
+  try {
+    const body = await (await fetch(`http://localhost:${server.port}/api/schedule`)).json();
+
+    expect(body.programmes.map((p: { title: string }) => p.title)).toEqual(["Currently Airing", "Up Next"]);
+    expect(body.onAir.title).toBe("Currently Airing");
+    expect(body.onAir.start).toBe(onNow.start.toISOString()); // wire dates are ISO strings
+
+    // Same injected grid, only time has moved — across the boundary the
+    // route must answer differently.
+    await Bun.sleep(700);
+    const after = await (await fetch(`http://localhost:${server.port}/api/schedule`)).json();
+    expect(after.onAir.title).toBe("Up Next");
   } finally {
     source.end();
     await server.stop();

@@ -17,6 +17,7 @@ someone hits send.
 | `/` | the live feed UI |
 | `/ws` | websocket — a snapshot on connect, then one message per comment |
 | `/api/health` | buffered count, comments/min, upstream state, connected tabs |
+| `/api/schedule` | the broadcast grid, plus the programme on air right now |
 
 Set `PORT` to serve somewhere else.
 
@@ -113,6 +114,7 @@ behind a reverse proxy is the whole deployment.
 | --- | --- |
 | `src/viafoura.ts` | REST client — comments, replies, user lookups, container resolution |
 | `src/realtime.ts` | the websocket subscription and its reconnect loop |
+| `src/schedule.ts` | the broadcast schedule, scraped from the `/watch/schedule` page |
 | `src/stream.ts` | merges both sources into one de-duplicated stream |
 | `src/app-server.ts` | serves the UI and fans the stream out to browser tabs |
 | `web/` | the React frontend, bundled by Bun's HTML import |
@@ -166,6 +168,33 @@ loses nothing.
 
 Measured on the live feed: socket median **398 ms** behind the posted timestamp,
 3-second polling median **2,557 ms**.
+
+### The broadcast schedule
+
+There is no public schedule JSON endpoint. The `/watch/schedule` page ships the
+complete multi-week grid inline as `window.schedule_response = [...]` and its
+date picker only filters that array client-side — confirmed with a full network
+capture (no schedule XHR on load or on date change). `src/schedule.ts` fetches
+the page, extracts that array, and normalises it.
+
+The array is a JavaScript literal, **not JSON**: strings are single-quoted
+until a value contains an apostrophe, then that one string is double-quoted
+instead — a Python-repr habit inherited from upstream. Public evidence from
+2023 places that upstream in Azure (Synapse → Logic App → API Management as
+`FetchRecordsFromDatabase/manual-invoke`, on RebelMouse post `2659031149`),
+but the pipeline's current shape is unconfirmed, so the parser trusts only the
+literal's grammar, accepts both JSON and Python spellings of null/booleans,
+and fails loudly on anything else.
+
+Quirks observed live and normalised (details in the `schedule.ts` docblock):
+the page's "All times GMT" label is wrong in summer (timestamps carry the
+correct `+01:00`, so parsing into Dates settles it), presenter section ids
+arrive duplicated, image URLs double their `&` separators, and continuity
+slots (the national anthem) have null section ids and zero duration.
+
+The page weighs ~600 KB, so the server caches the parsed grid for 30 minutes
+and computes "on air now" per request from the cached copy. On a failed
+refresh the previous grid is served for as long as it exists.
 
 ### Container UUIDs
 
