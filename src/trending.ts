@@ -353,18 +353,42 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     const parts = key.split(" ");
     if (parts.every((p) => claimed.has(p))) continue; // both words already in a full-name trigram
     const isName = s.caps / s.recent >= 0.6;
-    let recent = s.recent;
-    let sc = score(s) * 1.6;
+
+    // Decide before mutating anything: a phrase either speaks for a bare word,
+    // or the bare word speaks for it. Showing both is the redundancy that put
+    // "bbq's" and "disposable BBQ" in the row as separate topics.
+    const absorbs = new Map<string, Stat>();
+    let redundant = false;
     for (const part of parts) {
       const u = uni.get(part);
       if (!u) continue;
-      if (s.recent >= 0.6 * u.recent) {
-        consumed.add(part); // the phrase is the dominant form of this word
-      } else if (isName && u.recent >= s.recent) {
-        consumed.add(part); // same person, shorter name → fold it in and upgrade
-        recent = Math.max(recent, u.recent);
-        sc = Math.max(sc, score(u));
+      // The phrase leads when it accounts for a fair share of the word's
+      // mentions; a name leads over its own shorter form at any share, since
+      // "Stadlen" and "Matthew Stadlen" are unambiguously one person.
+      if (s.recent >= 0.4 * u.recent || (isName && u.recent >= s.recent)) {
+        absorbs.set(part, u);
+      } else if (u.recent > s.recent) {
+        // The bare word is the bigger topic and its count already includes
+        // every comment this phrase matched — the phrase adds nothing.
+        redundant = true;
       }
+    }
+    if (redundant) {
+      // The bare word wins, but the phrase's other word ("disposable" of
+      // "disposable BBQ") lives only inside this phrase — on its own it is a
+      // meaningless chip, so let it go with the phrase.
+      for (const part of absorbs.keys()) consumed.add(part);
+      continue;
+    }
+
+    let recent = s.recent;
+    let sc = score(s) * 1.6;
+    for (const [part, u] of absorbs) {
+      consumed.add(part);
+      // Whatever absorbs a word inherits its weight — otherwise a topic
+      // mentioned a dozen times is displayed with the phrase's small count.
+      recent = Math.max(recent, u.recent);
+      sc = Math.max(sc, score(u));
     }
     candidates.push({ word: bestForm(s.forms) ?? key, recent, prior: s.prior, score: sc, authors: s.authors.size, parts });
     for (const w of parts) claimed.add(w);
@@ -374,20 +398,25 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   // bridged phrase AND both endpoints are themselves trending — so it surfaces
   // "stop the boats" by uniting two hot topics rather than inventing a phrase.
   const connectives: Trend[] = [];
+  // The phrase's own mention count, kept apart from the merged `recent` above,
+  // so a dropped phrase can tell which endpoints it actually speaks for.
+  const rawCount = new Map<Trend, number>();
   for (const [key, s] of conn) {
     if (s.authors.size < 2) continue;
     const stems = key.split(" ");
     const head = uni.get(stems[0]!);
     const tail = uni.get(stems[stems.length - 1]!);
     if (!head || !tail || head.recent < 2 || tail.recent < 2) continue;
-    connectives.push({
+    const trend: Trend = {
       word: bestForm(s.forms) ?? key,
       recent: Math.max(s.recent, head.recent, tail.recent),
       prior: s.prior,
       score: Math.max(score(s) * 1.8, score(head), score(tail)),
       authors: s.authors.size,
       parts: [stems[0]!, stems[stems.length - 1]!],
-    });
+    };
+    rawCount.set(trend, s.recent);
+    connectives.push(trend);
   }
 
   // Collapse overlapping fragments of the *same repeated sentence*. When ~7
@@ -395,17 +424,34 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   // "Carlson is in bed" and "bed with Dubai" pile up beside the "Tucker Carlson"
   // bigram — three chips for one topic. Taking connectives strongest-first, we
   // keep one only if neither endpoint is already claimed (by a bigram or a
-  // stronger connective), and always consume its endpoints so a bare
-  // "bed"/"Dubai" unigram can't leak through the gap either.
+  // stronger connective).
+  //
+  // "Claimed" and "consumed" are deliberately different things. A dropped
+  // phrase still *claims* its endpoints, so the next fragment of the same
+  // sentence ("bed with Dubai" after "Carlson is in bed") can't chain off them
+  // — but it must not *consume* them, because that also deleted the bare words
+  // and a topic mentioned a dozen times could vanish behind a four-mention
+  // phrase. Only a phrase that earns a chip suppresses the words it stands for.
   connectives.sort((a, b) => b.score - a.score);
   for (const p of connectives) {
     const parts = p.parts ?? [];
     const overlaps = parts.some((w) => claimed.has(w));
-    for (const w of parts) {
-      claimed.add(w);
-      consumed.add(w);
+    for (const w of parts) claimed.add(w);
+
+    if (overlaps) {
+      // Dropped: suppress only the words this phrase effectively owns. "bed"
+      // exists solely inside "…is in bed with Dubai" and is junk on its own,
+      // whereas a word with a life of its own outside the phrase stays.
+      const raw = rawCount.get(p) ?? 0;
+      for (const w of parts) {
+        const u = uni.get(w);
+        if (u && raw >= 0.6 * u.recent) consumed.add(w);
+      }
+      continue;
     }
-    if (!overlaps) candidates.push(p);
+
+    for (const w of parts) consumed.add(w);
+    candidates.push(p);
   }
 
   const singles: Trend[] = [];

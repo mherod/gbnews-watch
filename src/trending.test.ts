@@ -65,6 +65,61 @@ test("detects a two-word phrase and suppresses its parts", () => {
   expect(words).not.toContain("cox");
 });
 
+test("a specific phrase folds into the bare word that dominates it", () => {
+  // 8 people say "bbq's", 4 say "disposable BBQ" — one topic, not two chips.
+  const bbq = [
+    "these bbq's should be banned",
+    "who leaves bbq's about",
+    "bbq's again honestly",
+    "the bbq's caused it",
+    "ban bbq's outright",
+    "bbq's every summer",
+    "another of those bbq's",
+    "bbq's are the issue",
+  ].map((body, i) => c(body, { author: `b${i}` }));
+  const disposable = [
+    "a disposable BBQ started it",
+    "disposable BBQ of course",
+    "blame the disposable BBQ",
+    "disposable BBQ nonsense",
+  ].map((body, i) => c(body, { author: `d${i}` }));
+
+  const words = computeTrends([...bbq, ...disposable], NOW, { limit: 8 }).map((t) => t.word.toLowerCase());
+  expect(words.filter((w) => w.includes("bbq"))).toHaveLength(1); // one BBQ topic
+  expect(words).not.toContain("disposable bbq"); // the minority phrase folds in
+  expect(words).not.toContain("disposable"); // and doesn't leak its own word
+});
+
+test("the word that absorbs a phrase keeps the bigger count", () => {
+  const trends = computeTrends(
+    [
+      ...fromMany("toilets are filthy", 6),
+      ...fromMany("the public toilets closed", 3),
+    ],
+    NOW,
+    { limit: 8 },
+  );
+  const toilet = trends.find((t) => t.word.toLowerCase().includes("toilet"));
+  expect(toilet).toBeTruthy();
+  expect(toilet!.recent).toBeGreaterThanOrEqual(9); // all mentions, not just one form's
+});
+
+test("a dropped phrase does not delete a bare word that outranks it", () => {
+  // "migrants" is the big topic; a smaller overlapping phrase must not take it
+  // down with it when that phrase loses its slot.
+  const trends = computeTrends(
+    [
+      ...fromMany("migrants arriving daily", 9),
+      ...fromMany("illegal migrants again", 3),
+    ],
+    NOW,
+    { limit: 8 },
+  );
+  const migrants = trends.filter((t) => t.word.toLowerCase().includes("migrant"));
+  expect(migrants.length).toBeGreaterThanOrEqual(1); // the topic survives
+  expect(Math.max(...migrants.map((t) => t.recent))).toBeGreaterThanOrEqual(9);
+});
+
 test("folds overlapping name-bigrams into one full-name trigram", () => {
   const trends = computeTrends(fromMany("Muhammad Ziauddin Yusuf is a disgrace", 6), NOW, { limit: 8 });
   const words = trends.map((t) => t.word);
