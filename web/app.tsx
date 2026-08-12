@@ -557,9 +557,12 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
   emoji: EmojiCount[];
 }) {
   if (trends.length === 0 && emoji.length === 0) return null;
+  // When every chip is single-voice filler, nothing is really trending — say so.
+  const allWeak = trends.length > 0 && trends.every((t) => t.weak);
   return (
     <div className="trends" aria-label="Trending words">
       <span className="trends__label">🔥 Trending</span>
+      {allWeak && <span className="trends__quiet" title="No topic has caught on with more than one person yet">· quiet</span>}
       <div className="trends__chips">
         {trends.map((t) => {
           const active = filter?.toLowerCase() === t.word.toLowerCase();
@@ -567,9 +570,9 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
             <button
               key={t.word}
               type="button"
-              className={`trends__chip${active ? " trends__chip--active" : ""}`}
+              className={`trends__chip${active ? " trends__chip--active" : ""}${t.weak ? " trends__chip--weak" : ""}`}
               aria-pressed={active}
-              title={active ? `Clear filter` : `Filter to “${t.word}”`}
+              title={active ? `Clear filter` : t.weak ? `Only one voice so far — filter to “${t.word}”` : `Filter to “${t.word}”`}
               onClick={() => onToggle(t.word)}
             >
               {t.word}

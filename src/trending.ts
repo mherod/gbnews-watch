@@ -40,6 +40,10 @@ export interface Trend {
    * "Tory". Undefined for ordinary trends (they match their own word).
    */
   pattern?: string;
+  /** Distinct voices (authors) behind this trend; <2 means single-voice filler. */
+  authors?: number;
+  /** Filler shown only to keep the row populated when little is trending; the UI mutes it. */
+  weak?: boolean;
 }
 
 /** The fields `computeTrends` needs from a comment. */
@@ -317,6 +321,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     recent: s.recent,
     prior: s.prior,
     score: score(s) * boost,
+    authors: s.authors.size,
     parts,
   });
 
@@ -330,7 +335,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   for (const [key, s] of tri) {
     if (s.recent < 2) continue;
     const parts = key.split(" ");
-    candidates.push({ word: bestForm(s.forms) ?? key, recent: s.recent, prior: s.prior, score: score(s) * 1.6, parts });
+    candidates.push({ word: bestForm(s.forms) ?? key, recent: s.recent, prior: s.prior, score: score(s) * 1.6, authors: s.authors.size, parts });
     for (const w of parts) {
       claimed.add(w);
       consumed.add(w);
@@ -361,7 +366,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
         sc = Math.max(sc, score(u));
       }
     }
-    candidates.push({ word: bestForm(s.forms) ?? key, recent, prior: s.prior, score: sc, parts });
+    candidates.push({ word: bestForm(s.forms) ?? key, recent, prior: s.prior, score: sc, authors: s.authors.size, parts });
     for (const w of parts) claimed.add(w);
   }
 
@@ -380,6 +385,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       recent: Math.max(s.recent, head.recent, tail.recent),
       prior: s.prior,
       score: Math.max(score(s) * 1.8, score(head), score(tail)),
+      authors: s.authors.size,
       parts: [stems[0]!, stems[stems.length - 1]!],
     });
   }
@@ -413,6 +419,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       recent: s.recent,
       prior: s.prior,
       score: score(s),
+      authors: s.authors.size,
       pattern: entityPattern(key),
     };
     (s.recent >= 2 ? candidates : singles).push(trend);
@@ -423,16 +430,17 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     (s.recent >= 2 ? candidates : singles).push(toTrend(key, s, 1));
   }
 
-  candidates.sort((a, b) => b.score - a.score);
-  const result = candidates.slice(0, limit);
+  // A trend is "real" only with ≥2 distinct voices — one person can't make a
+  // trend. Single-voice candidates and single-mention terms are filler: still
+  // shown to keep the row from emptying when little is happening, but flagged
+  // `weak` so the UI mutes them instead of passing them off as genuine trends.
+  const real = candidates.filter((t) => (t.authors ?? 0) >= 2).sort((a, b) => b.score - a.score);
+  const filler = [...candidates.filter((t) => (t.authors ?? 0) < 2), ...singles].sort((a, b) => b.score - a.score);
 
-  // Backfill toward the minimum from single-mention terms so the bar rarely empties.
-  if (result.length < minTrends) {
-    singles.sort((a, b) => b.score - a.score);
-    for (const s of singles) {
-      if (result.length >= minTrends) break;
-      result.push(s);
-    }
+  const result = real.slice(0, limit);
+  for (const t of filler) {
+    if (result.length >= minTrends) break;
+    result.push({ ...t, weak: true });
   }
   return result;
 }
@@ -445,9 +453,10 @@ export interface StickyEntry {
 
 /**
  * Keeps a topic on screen for a dwell time after it stops trending, so the row
- * doesn't churn — while letting fresh topics lead. Currently-trending topics
- * are ranked first (they can always take the top); faded-but-still-sticky ones
- * fill the remaining slots until their dwell expires. Mutates `sticky`.
+ * doesn't churn — while letting fresh topics lead. Ordering is real fresh
+ * trends, then still-sticky faded ones, then single-voice filler as a last
+ * resort — so a lingering real topic always beats fresh filler, and filler
+ * never lingers (weak trends aren't persisted). Mutates `sticky`.
  */
 export function mergeStickyTrends(
   fresh: Trend[],
@@ -458,7 +467,8 @@ export function mergeStickyTrends(
   const stickyMs = opts.stickyMs ?? 180_000; // 3 minutes
   const display = opts.display ?? 6;
 
-  for (const t of fresh) sticky.set(t.word.toLowerCase(), { until: now + stickyMs, trend: t });
+  // Only real trends earn a dwell; filler is ephemeral (shown this tick or not).
+  for (const t of fresh) if (!t.weak) sticky.set(t.word.toLowerCase(), { until: now + stickyMs, trend: t });
   for (const [key, entry] of sticky) if (entry.until <= now) sticky.delete(key);
 
   const freshKeys = new Set(fresh.map((t) => t.word.toLowerCase()));
@@ -466,7 +476,8 @@ export function mergeStickyTrends(
     .filter(([key]) => !freshKeys.has(key))
     .map(([, entry]) => entry.trend)
     .sort((a, b) => b.score - a.score);
-  const freshSorted = [...fresh].sort((a, b) => b.score - a.score);
+  const freshReal = fresh.filter((t) => !t.weak).sort((a, b) => b.score - a.score);
+  const freshWeak = fresh.filter((t) => t.weak).sort((a, b) => b.score - a.score);
 
-  return [...freshSorted, ...faded].slice(0, display);
+  return [...freshReal, ...faded, ...freshWeak].slice(0, display);
 }

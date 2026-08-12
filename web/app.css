@@ -355,6 +355,31 @@ body {
   color: #fff;
 }
 
+/* Single-voice filler: muted so it never reads as a genuine trend. */
+.trends__chip--weak {
+  background: color-mix(in srgb, var(--ink-faint) 12%, transparent);
+  color: var(--ink-faint);
+  font-weight: 500;
+  animation: none;
+}
+
+.trends__chip--weak:hover {
+  background: color-mix(in srgb, var(--ink-faint) 20%, transparent);
+}
+
+.trends__chip--weak i {
+  background: color-mix(in srgb, var(--ink-faint) 18%, transparent);
+  color: var(--ink-faint);
+}
+
+.trends__quiet {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* filter status line */
 
 .feed__meta--filter {

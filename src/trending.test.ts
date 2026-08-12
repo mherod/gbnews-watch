@@ -191,7 +191,29 @@ test("collapses overlapping fragments of one repeated sentence into a single top
   expect(words.filter((w) => w.toLowerCase().includes("carlson"))).toHaveLength(1); // one chip
 });
 
-const trend = (word: string, score: number): Trend => ({ word, recent: 3, prior: 0, score });
+test("flags single-voice filler weak but leaves real trends unmarked", () => {
+  const trends = computeTrends(
+    [...fromMany("immigration", 3), c("Nobody", { author: "z" })],
+    NOW,
+    { minTrends: 3 },
+  );
+  expect(trends.find((t) => t.word.toLowerCase() === "immigration")?.weak).toBeFalsy();
+  expect(trends.find((t) => t.word.toLowerCase() === "nobody")?.weak).toBe(true);
+});
+
+test("a term repeated by one person is filler, not a real trend", () => {
+  const trends = computeTrends(
+    Array.from({ length: 5 }, () => c("Rammell", { author: "solo" })), // 1 author, 5×
+    NOW,
+    { minTrends: 1 },
+  );
+  const rammell = trends.find((t) => t.word.toLowerCase() === "rammell");
+  expect(rammell).toBeTruthy(); // still shown so the row isn't empty
+  expect(rammell?.weak).toBe(true); // but muted — one voice isn't a trend
+});
+
+const trend = (word: string, score: number): Trend => ({ word, recent: 3, prior: 0, score, authors: 3 });
+const weak = (word: string, score: number): Trend => ({ word, recent: 1, prior: 0, score, weak: true });
 
 test("a topic lingers for the dwell time after it stops trending", () => {
   const sticky = new Map<string, StickyEntry>();
@@ -216,6 +238,24 @@ test("a fresh topic still takes the lead over lingering ones", () => {
   const next = mergeStickyTrends([trend("burnham", 5)], sticky, t0 + 30_000, { stickyMs: 180_000 });
   expect(next[0]?.word).toBe("burnham");
   expect(next.map((t) => t.word)).toContain("eclipse");
+});
+
+test("single-voice filler never lingers like a real trend", () => {
+  const sticky = new Map<string, StickyEntry>();
+  const t0 = 1_000_000;
+  mergeStickyTrends([weak("blip", 9)], sticky, t0, { stickyMs: 180_000 });
+  // A tick later the filler is gone from fresh; it must not have been stored.
+  const next = mergeStickyTrends([trend("burnham", 5)], sticky, t0 + 30_000, { stickyMs: 180_000 });
+  expect(next.map((t) => t.word)).not.toContain("blip");
+});
+
+test("a lingering real trend outranks fresh single-voice filler", () => {
+  const sticky = new Map<string, StickyEntry>();
+  const t0 = 1_000_000;
+  mergeStickyTrends([trend("eclipse", 10)], sticky, t0, { stickyMs: 180_000 });
+  // Next tick only filler is fresh — the faded real trend should still lead.
+  const next = mergeStickyTrends([weak("wibble", 99)], sticky, t0 + 30_000, { stickyMs: 180_000 });
+  expect(next[0]?.word).toBe("eclipse");
 });
 
 test("termRegex matches whole words and phrases, case-insensitively", () => {
