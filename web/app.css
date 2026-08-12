@@ -381,14 +381,17 @@ body {
     border-left: none;
     padding-left: 0;
   }
+  /*
+   * Wrap the chips onto as many lines as they need rather than hiding them in
+   * a horizontal scroller — a clipped chip reads as broken, and a topic nobody
+   * scrolls to may as well not be listed.
+   */
   .trends__chips {
     order: 3;
     flex-basis: 100%;
-  }
-  /* Signal that the chip row keeps going rather than just clipping a chip. */
-  .trends__chips {
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
-    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+    flex-wrap: wrap;
+    row-gap: 8px;
+    overflow: visible; /* no scroller, so nothing to fade or contain */
   }
 }
 
@@ -415,24 +418,24 @@ body {
  */
 @media (pointer: coarse) {
   /*
-   * overflow-x:auto silently coerces overflow-y to auto, so the 44px hit
-   * overlay below (taller than a 21px chip) left the scroller with 12px of
-   * stray vertical scroll. Pad the scrollport to fit the overlay and pull the
-   * padding back out with a negative margin so the row's height is unchanged.
+   * Chips grow a real touch height rather than wearing an invisible overlay.
+   * Once they wrap, a 44px overlay on a 21px chip spills 11.5px into the row
+   * below and starts stealing its taps — and a real box can't do that.
+   * 36px is short of Apple's 44px floor, but the chips row is inside a sticky
+   * masthead: at 44px, three wrapped rows push the header past a fifth of a
+   * phone screen and permanently cover the feed.
    */
-  .trends__chips {
-    padding-block: 12px;
-    margin-block: -12px;
+  .trends__chip {
+    min-height: 36px;
   }
 
-  .trends__chip,
   .emoji-chip,
   .room-panel__toggle,
   .feed__clear {
     position: relative;
   }
 
-  .trends__chip::after,
+  /* These sit on a single line, so an overlay can't overlap a neighbouring row. */
   .emoji-chip::after,
   .room-panel__toggle::after,
   .feed__clear::after {
@@ -1102,9 +1105,18 @@ body {
     gap: 12px;
   }
   .meters {
-    gap: 16px;
+    gap: 14px;
     width: 100%;
     justify-content: flex-start;
+  }
+  /*
+   * Wrapped chips make this header tall and, worse, variably tall — it grows
+   * with however many topics are live. A sticky bar that can eat 45% of a
+   * phone screen is worse than no sticky bar, so on mobile the masthead
+   * scrolls away and the feed gets the whole viewport.
+   */
+  .masthead {
+    position: static;
   }
   .comment {
     grid-template-columns: 30px 1fr;
