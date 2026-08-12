@@ -2,7 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover is what makes env(safe-area-inset-*) resolve to
+         anything but 0, so the sticky masthead can clear the notch. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- Let Safari draw native scrollbars/controls in the right scheme. -->
+    <meta name="color-scheme" content="light dark" />
+    <!-- Status-bar tint follows the theme; values match --bg in app.css. -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7f9" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1116" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Have Your Say" />
     <title>Have Your Say — live</title>
     <link rel="stylesheet" href="./app.css" />
   </head>

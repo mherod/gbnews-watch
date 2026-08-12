@@ -35,6 +35,15 @@
   box-sizing: border-box;
 }
 
+html {
+  /* Stop Safari arbitrarily rescaling text after an orientation change.
+     Pinch-zoom still works — this only pins the automatic adjustment. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* The masthead is sticky, so anything scrolled into view must clear it. */
+  scroll-padding-top: calc(env(safe-area-inset-top) + 64px);
+}
+
 html,
 body {
   margin: 0;
@@ -44,10 +53,19 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+body {
+  /* The document is the scroller here, so keep the elastic bounce from
+     chaining into a pull-to-refresh while reading the feed. */
+  overscroll-behavior-y: contain;
+}
+
 .shell {
   max-width: 720px;
   margin: 0 auto;
-  padding: 20px 20px 64px;
+  /* Bottom padding clears the home indicator; env() is 0 elsewhere. */
+  padding: 20px 20px calc(64px + env(safe-area-inset-bottom));
+  padding-left: max(20px, env(safe-area-inset-left));
+  padding-right: max(20px, env(safe-area-inset-right));
 }
 
 /* ---------- header ---------- */
@@ -57,9 +75,15 @@ body {
   top: 0;
   z-index: 10;
   background: color-mix(in srgb, var(--bg) 92%, transparent);
+  /* Safari still needs the prefix — without it the masthead simply doesn't blur. */
+  -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--line);
-  padding: 16px 20px 14px;
+  /* Clear the notch/Dynamic Island; env() resolves to 0 off-iOS, so the
+     padding is unchanged everywhere else. */
+  padding: calc(16px + env(safe-area-inset-top)) 20px 14px;
+  padding-left: max(20px, env(safe-area-inset-left));
+  padding-right: max(20px, env(safe-area-inset-right));
 }
 
 .masthead__row {
@@ -308,8 +332,11 @@ body {
   transition: background 0.15s ease, transform 0.08s ease;
 }
 
-.emoji-chip:hover {
-  background: color-mix(in srgb, var(--ink-faint) 16%, transparent);
+/* Gated: on touch, :hover latches after a tap and the chip stays lit. */
+@media (hover: hover) {
+  .emoji-chip:hover {
+    background: color-mix(in srgb, var(--ink-faint) 16%, transparent);
+  }
 }
 
 .emoji-chip:active {
@@ -344,8 +371,25 @@ body {
   }
   /* Signal that the chip row keeps going rather than just clipping a chip. */
   .trends__chips {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
     mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
   }
+}
+
+/*
+ * Every tap target: kill the residual double-tap-zoom delay and the grey iOS
+ * flash, and stop a long-press raising the copy/share sheet on a control.
+ */
+.trends__chip,
+.emoji-chip,
+.room-panel__toggle,
+.feed__clear,
+.comment__more,
+.replyto--linked,
+.hl {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
 
 /*
@@ -397,8 +441,10 @@ body {
   transition: background 0.15s ease, color 0.15s ease, transform 0.08s ease;
 }
 
-.trends__chip:hover {
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
+@media (hover: hover) {
+  .trends__chip:hover {
+    background: color-mix(in srgb, var(--accent) 28%, transparent);
+  }
 }
 
 .trends__chip:active {
@@ -473,8 +519,10 @@ body {
   animation: none;
 }
 
-.trends__chip--weak:hover {
-  background: color-mix(in srgb, var(--ink-faint) 20%, transparent);
+@media (hover: hover) {
+  .trends__chip--weak:hover {
+    background: color-mix(in srgb, var(--ink-faint) 20%, transparent);
+  }
 }
 
 .trends__chip--weak i {
@@ -541,9 +589,11 @@ body {
   transition: color 0.15s ease, border-color 0.15s ease;
 }
 
-.room-panel__toggle:hover {
-  color: var(--ink);
-  border-color: var(--ink-faint);
+@media (hover: hover) {
+  .room-panel__toggle:hover {
+    color: var(--ink);
+    border-color: var(--ink-faint);
+  }
 }
 
 .room-panel--closed .room-panel__bar {
@@ -606,9 +656,11 @@ body {
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.feed__clear:hover {
-  background: var(--panel-2);
-  color: var(--ink);
+@media (hover: hover) {
+  .feed__clear:hover {
+    background: var(--panel-2);
+    color: var(--ink);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -727,6 +779,7 @@ body {
   font-weight: 650;
   color: #fff;
   letter-spacing: 0.02em;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -787,9 +840,11 @@ body {
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.replyto--linked:hover {
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+@media (hover: hover) {
+  .replyto--linked:hover {
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  }
 }
 
 .replyto__arrow {
@@ -855,8 +910,10 @@ body {
   transition: background 0.12s ease;
 }
 
-.hl:hover {
-  background: color-mix(in srgb, var(--accent) 38%, transparent);
+@media (hover: hover) {
+  .hl:hover {
+    background: color-mix(in srgb, var(--accent) 38%, transparent);
+  }
 }
 
 .hl--filter {
@@ -864,8 +921,10 @@ body {
   font-weight: 600;
 }
 
-.hl--filter:hover {
-  background: color-mix(in srgb, var(--warn) 45%, transparent);
+@media (hover: hover) {
+  .hl--filter:hover {
+    background: color-mix(in srgb, var(--warn) 45%, transparent);
+  }
 }
 
 /* Sentiment tint — where the heat (or warmth) is. */
@@ -900,8 +959,10 @@ body {
   transition: background 0.15s ease;
 }
 
-.comment__more:hover {
-  background: var(--accent-soft);
+@media (hover: hover) {
+  .comment__more:hover {
+    background: var(--accent-soft);
+  }
 }
 
 .chatty {
