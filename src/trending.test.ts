@@ -57,11 +57,22 @@ test("a steady (non-surging) topic still shows", () => {
 });
 
 test("detects a two-word phrase and suppresses its parts", () => {
-  const trends = computeTrends(fromMany("Yesss Paul Cox", 3), NOW);
+  // lowercase lead-in so the capitalised run is exactly the two-word name
+  const trends = computeTrends(fromMany("yesss Paul Cox", 3), NOW);
   const words = trends.map((t) => t.word.toLowerCase());
   expect(words).toContain("paul cox");
   expect(words).not.toContain("paul");
   expect(words).not.toContain("cox");
+});
+
+test("folds overlapping name-bigrams into one full-name trigram", () => {
+  const trends = computeTrends(fromMany("Muhammad Ziauddin Yusuf is a disgrace", 6), NOW, { limit: 8 });
+  const words = trends.map((t) => t.word);
+  expect(words).toContain("Muhammad Ziauddin Yusuf"); // the full name, once
+  expect(words).not.toContain("Muhammad Ziauddin"); // not the overlapping halves
+  expect(words).not.toContain("Ziauddin Yusuf");
+  expect(words.some((w) => w.toLowerCase() === "ziauddin")).toBe(false); // no bare middle name
+  expect(words.filter((w) => w.toLowerCase().includes("ziauddin"))).toHaveLength(1);
 });
 
 test("preserves the phrase's original casing", () => {

@@ -160,6 +160,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
 
   const uni = new Map<string, Stat>();
   const bi = new Map<string, Stat>();
+  const tri = new Map<string, Stat>(); // three-word proper-noun names (Muhammad Ziauddin Yusuf)
   const conn = new Map<string, Stat>(); // two topics bridged by short stopword glue
   const ent = new Map<string, Stat>(); // curated known entities (NHS, Tory→Conservative)
 
@@ -226,6 +227,31 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
         weight,
         cap: isCapitalized(cur[0]) && isCapitalized(next[0]),
       });
+    }
+
+    // Proper-noun trigrams: three consecutive Capitalised content words with
+    // whitespace-only gaps — a full name like "Muhammad Ziauddin Yusuf". These
+    // fold the overlapping name-bigrams ("Muhammad Ziauddin" + "Ziauddin Yusuf")
+    // into a single topic below. Restricted to capitalised runs so generic
+    // three-word phrases don't flood in.
+    const seenTri = new Set<string>();
+    for (let i = 0; i + 2 < matches.length; i++) {
+      if (entIdx.has(i) || entIdx.has(i + 1) || entIdx.has(i + 2)) continue;
+      const t0 = matches[i]!;
+      const t1 = matches[i + 1]!;
+      const t2 = matches[i + 2]!;
+      const g1 = c.body.slice(t0.index! + t0[0].length, t1.index!);
+      const g2 = c.body.slice(t1.index! + t1[0].length, t2.index!);
+      if (!/^\s+$/.test(g1) || !/^\s+$/.test(g2)) continue;
+      if (!isCapitalized(t0[0]) || !isCapitalized(t1[0]) || !isCapitalized(t2[0])) continue;
+      const a = normalize(t0[0]);
+      const b = normalize(t1[0]);
+      const d = normalize(t2[0]);
+      if (!isContentWord(a) || !isContentWord(b) || !isContentWord(d)) continue;
+      const key = `${a} ${b} ${d}`;
+      if (seenTri.has(key)) continue;
+      seenTri.add(key);
+      record(tri, key, `${t0[0]} ${t1[0]} ${t2[0]}`, { isRecent, author, weight, cap: true });
     }
 
     // Connective phrases: two content words bridged by 1–2 stopwords joined only
@@ -298,6 +324,19 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   const consumed = new Set<string>();
   const claimed = new Set<string>(); // phrase endpoints already spoken for
 
+  // Proper-noun trigrams (full names) first: they claim all three words so the
+  // overlapping name-bigrams below fold into the single full name — "Muhammad
+  // Ziauddin Yusuf", not "Muhammad Ziauddin" + "Ziauddin Yusuf".
+  for (const [key, s] of tri) {
+    if (s.recent < 2) continue;
+    const parts = key.split(" ");
+    candidates.push({ word: bestForm(s.forms) ?? key, recent: s.recent, prior: s.prior, score: score(s) * 1.6, parts });
+    for (const w of parts) {
+      claimed.add(w);
+      consumed.add(w);
+    }
+  }
+
   // Bigram phrases, boosted. A bare word is dropped when the phrase covers most
   // of it; and a proper-noun phrase *absorbs and upgrades* a more-popular bare
   // part — so "Stadlen" (20) and "Matthew Stadlen" (4) become one "Matthew
@@ -307,6 +346,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   for (const [key, s] of bi) {
     if (s.recent < 2) continue;
     const parts = key.split(" ");
+    if (parts.every((p) => claimed.has(p))) continue; // both words already in a full-name trigram
     const isName = s.caps / s.recent >= 0.6;
     let recent = s.recent;
     let sc = score(s) * 1.6;
