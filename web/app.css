@@ -364,10 +364,26 @@ body {
 }
 
 @media (max-width: 560px) {
+  /*
+   * The label and the emoji strip are both unshrinkable, so on a phone they
+   * took 300 of 347px and left the chip scroller 27px — not one chip fitted.
+   * Give the chips their own full-width line underneath instead.
+   */
+  .trends {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+  .trends__label {
+    order: 1;
+  }
   .trends__emoji {
-    margin-left: 0;
+    order: 2;
     border-left: none;
     padding-left: 0;
+  }
+  .trends__chips {
+    order: 3;
+    flex-basis: 100%;
   }
   /* Signal that the chip row keeps going rather than just clipping a chip. */
   .trends__chips {
@@ -398,6 +414,17 @@ body {
  * gets the 44px Apple HIG / WCAG target while the design keeps its scale.
  */
 @media (pointer: coarse) {
+  /*
+   * overflow-x:auto silently coerces overflow-y to auto, so the 44px hit
+   * overlay below (taller than a 21px chip) left the scroller with 12px of
+   * stray vertical scroll. Pad the scrollport to fit the overlay and pull the
+   * padding back out with a negative margin so the row's height is unchanged.
+   */
+  .trends__chips {
+    padding-block: 12px;
+    margin-block: -12px;
+  }
+
   .trends__chip,
   .emoji-chip,
   .room-panel__toggle,
