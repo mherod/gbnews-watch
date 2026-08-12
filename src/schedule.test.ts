@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  deserializeSchedule,
   extractScheduleArray,
   normalizeProgramme,
   onAirAt,
   parseSchedulePage,
   programmesOn,
   programmeToWire,
+  scheduleHorizon,
+  serializeSchedule,
 } from "./schedule";
 
 /**
@@ -199,5 +202,53 @@ describe("programmeToWire", () => {
     expect(wire.start).toBe("2026-08-12T05:00:00.000Z");
     expect(wire.end).toBe("2026-08-12T08:30:00.000Z");
     expect(wire.title).toBe("Breakfast");
+  });
+});
+
+describe("schedule snapshots", () => {
+  const programmes = parseSchedulePage(page(`${ANTHEM}, ${LIVE_SHOW}, ${REPLAY}`));
+  const fetchedAt = new Date("2026-08-12T04:00:00Z").getTime();
+  // REPLAY is the latest slot: ends 2026-08-13T03:59:00Z.
+  const horizon = new Date("2026-08-13T03:59:00Z").getTime();
+  const duringGrid = new Date("2026-08-12T06:00:00Z").getTime();
+
+  test("scheduleHorizon is the end of the last programme", () => {
+    expect(scheduleHorizon(programmes)).toBe(horizon);
+    expect(scheduleHorizon([])).toBeNull();
+  });
+
+  test("round-trips through serialize/deserialize with dates and order intact", () => {
+    const raw = serializeSchedule({ fetchedAt, programmes });
+    const revived = deserializeSchedule(raw, duringGrid)!;
+    expect(revived.fetchedAt).toBe(fetchedAt);
+    expect(revived.programmes.map((p) => p.title)).toEqual(programmes.map((p) => p.title));
+    expect(revived.programmes[1]!.start.getTime()).toBe(programmes[1]!.start.getTime());
+    expect(revived.programmes[1]!.presenterSectionIds).toEqual(programmes[1]!.presenterSectionIds);
+    expect(revived.programmes[0]!.showSectionId).toBeNull();
+  });
+
+  test("a snapshot whose final programme has ended is no longer relevant", () => {
+    const raw = serializeSchedule({ fetchedAt, programmes });
+    expect(deserializeSchedule(raw, horizon)).toBeNull(); // end-exclusive: gone at the horizon
+    expect(deserializeSchedule(raw, horizon - 1)).not.toBeNull();
+  });
+
+  test("rejects garbage, wrong shapes, and empty grids", () => {
+    expect(deserializeSchedule("not json", duringGrid)).toBeNull();
+    expect(deserializeSchedule("42", duringGrid)).toBeNull();
+    expect(deserializeSchedule('{"fetchedAt":"soon","programmes":[]}', duringGrid)).toBeNull();
+    expect(deserializeSchedule(serializeSchedule({ fetchedAt, programmes: [] }), duringGrid)).toBeNull();
+  });
+
+  test("drops unrevivable records but keeps the rest", () => {
+    const raw = JSON.stringify({
+      fetchedAt,
+      programmes: [
+        { title: "No dates" },
+        ...JSON.parse(serializeSchedule({ fetchedAt, programmes })).programmes,
+      ],
+    });
+    const revived = deserializeSchedule(raw, duringGrid)!;
+    expect(revived.programmes).toHaveLength(programmes.length);
   });
 });

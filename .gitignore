@@ -37,6 +37,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # the dev server's persisted topic-memory snapshot (see src/room-store.ts)
 .room-memory.json
+# the dev server's persisted schedule snapshot (same seam, schedule key)
+.schedule-cache.json
 
 # IntelliJ based IDEs
 .idea

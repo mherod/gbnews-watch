@@ -24,7 +24,12 @@ export interface RoomStore {
   /** A human word for logs ("upstash", "redis", "file:…"). */
   name: string;
   load(): Promise<string | null>;
-  save(snapshot: string): Promise<void>;
+  /**
+   * `expireAtMs` asks the backend to drop the key at that wall-clock time
+   * (Redis EXAT). Best-effort: the file backend ignores it, so a consumer
+   * whose snapshots go stale must also check relevance on load.
+   */
+  save(snapshot: string, opts?: { expireAtMs?: number }): Promise<void>;
 }
 
 const KEY = "gbnews-watch:room:v1";
@@ -45,8 +50,11 @@ export function upstashRestRoomStore(baseUrl: string, token: string, key = KEY):
       if (body.error) throw new Error(`upstash get: ${body.error}`);
       return body.result ?? null;
     },
-    async save(snapshot: string) {
-      const res = await fetch(url("set"), {
+    async save(snapshot: string, opts?: { expireAtMs?: number }) {
+      // SET options ride as query params in Upstash's REST dialect; EXAT wants
+      // unix seconds, rounded up so a key never dies before its stated moment.
+      const exat = opts?.expireAtMs !== undefined ? `?exat=${Math.ceil(opts.expireAtMs / 1000)}` : "";
+      const res = await fetch(url("set") + exat, {
         method: "POST",
         headers,
         body: snapshot,
@@ -60,7 +68,7 @@ export function upstashRestRoomStore(baseUrl: string, token: string, key = KEY):
 }
 
 /** Redis-over-TCP store using Bun's built-in client (supports rediss:// TLS). */
-export function redisRoomStore(url: string): RoomStore {
+export function redisRoomStore(url: string, key = KEY): RoomStore {
   let client: import("bun").RedisClient | undefined;
   const connect = async () => {
     if (!client) {
@@ -72,10 +80,15 @@ export function redisRoomStore(url: string): RoomStore {
   return {
     name: "redis",
     async load() {
-      return (await connect()).get(KEY);
+      return (await connect()).get(key);
     },
-    async save(snapshot: string) {
-      await (await connect()).set(KEY, snapshot);
+    async save(snapshot: string, opts?: { expireAtMs?: number }) {
+      const redis = await connect();
+      if (opts?.expireAtMs !== undefined) {
+        await redis.send("SET", [key, snapshot, "EXAT", String(Math.ceil(opts.expireAtMs / 1000))]);
+      } else {
+        await redis.set(key, snapshot);
+      }
     },
   };
 }
@@ -99,12 +112,21 @@ export function fileRoomStore(path: string): RoomStore {
  * integration has provisioned it; a TCP URL comes next; a file only makes
  * sense where the filesystem outlives the process (dev), because a serverless
  * /tmp write has exactly the lifetime problem this exists to fix.
+ *
+ * Generic over the snapshot being stored: the room memory and the schedule
+ * cache are different keys in the same backend, so anything else that needs
+ * to survive a cold start picks its own key/file and calls this.
  */
-export function resolveRoomStore(dev: boolean): RoomStore | null {
-  const { KV_REST_API_URL, KV_REST_API_TOKEN, REDIS_URL, KV_URL, ROOM_MEMORY_FILE } = process.env;
-  if (KV_REST_API_URL && KV_REST_API_TOKEN) return upstashRestRoomStore(KV_REST_API_URL, KV_REST_API_TOKEN);
+export function resolveSnapshotStore(dev: boolean, key: string, filePath: string): RoomStore | null {
+  const { KV_REST_API_URL, KV_REST_API_TOKEN, REDIS_URL, KV_URL } = process.env;
+  if (KV_REST_API_URL && KV_REST_API_TOKEN) return upstashRestRoomStore(KV_REST_API_URL, KV_REST_API_TOKEN, key);
   const tcpUrl = REDIS_URL ?? KV_URL;
-  if (tcpUrl) return redisRoomStore(tcpUrl);
-  if (dev || ROOM_MEMORY_FILE) return fileRoomStore(ROOM_MEMORY_FILE ?? ".room-memory.json");
+  if (tcpUrl) return redisRoomStore(tcpUrl, key);
+  if (dev) return fileRoomStore(filePath);
   return null;
+}
+
+export function resolveRoomStore(dev: boolean): RoomStore | null {
+  const file = process.env.ROOM_MEMORY_FILE;
+  return resolveSnapshotStore(dev || Boolean(file), KEY, file ?? ".room-memory.json");
 }

@@ -56,6 +56,80 @@ export function programmeToWire(p: Programme): WireProgramme {
   return { ...p, start: p.start.toISOString(), end: p.end.toISOString() };
 }
 
+/** The wall-clock moment the grid stops being able to answer anything: the
+ * end of its last programme. Null for an empty grid. */
+export function scheduleHorizon(programmes: readonly Programme[]): number | null {
+  let horizon: number | null = null;
+  for (const p of programmes) {
+    const end = p.end.getTime();
+    if (horizon === null || end > horizon) horizon = end;
+  }
+  return horizon;
+}
+
+/** A parsed grid plus when it was scraped, as persisted between lifetimes. */
+export interface ScheduleSnapshot {
+  fetchedAt: number;
+  programmes: Programme[];
+}
+
+export function serializeSchedule(snapshot: ScheduleSnapshot): string {
+  return JSON.stringify({
+    fetchedAt: snapshot.fetchedAt,
+    programmes: snapshot.programmes.map(programmeToWire),
+  });
+}
+
+/** A stored wire record back into a Programme; null when its dates don't revive. */
+function programmeFromWire(raw: unknown): Programme | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const w = raw as Record<string, unknown>;
+  const title = asString(w.title);
+  const start = asDate(w.start);
+  const end = asDate(w.end);
+  if (!title || !start || !end) return null;
+  return {
+    date: asString(w.date) ?? "",
+    start,
+    end,
+    title,
+    type: asString(w.type) ?? "",
+    image: asString(w.image),
+    presenters: Array.isArray(w.presenters) ? w.presenters.filter((p): p is string => typeof p === "string") : [],
+    description: asString(w.description) ?? "",
+    showSectionId: asId(w.showSectionId),
+    presenterSectionIds: Array.isArray(w.presenterSectionIds)
+      ? w.presenterSectionIds.map(asId).filter((id): id is number => id !== null)
+      : [],
+  };
+}
+
+/**
+ * Revives a stored snapshot — or returns null when it is unreadable, empty,
+ * or no longer *relevant*: a grid whose final programme has already ended
+ * cannot answer "what's on air" or render any upcoming day, so it is treated
+ * exactly like no snapshot at all. Backends with native expiry (Redis EXAT)
+ * drop the key at the same moment; this check covers the ones without.
+ */
+export function deserializeSchedule(raw: string, now: number): ScheduleSnapshot | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const snap = parsed as Record<string, unknown>;
+  if (typeof snap.fetchedAt !== "number" || !Array.isArray(snap.programmes)) return null;
+  const programmes = snap.programmes
+    .map(programmeFromWire)
+    .filter((p): p is Programme => p !== null)
+    .sort((a, b) => a.start.getTime() - b.start.getTime());
+  const horizon = scheduleHorizon(programmes);
+  if (horizon === null || horizon <= now) return null;
+  return { fetchedAt: snap.fetchedAt, programmes };
+}
+
 const ESCAPES: Record<string, string> = {
   n: "\n",
   t: "\t",

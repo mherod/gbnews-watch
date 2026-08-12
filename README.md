@@ -192,9 +192,15 @@ correct `+01:00`, so parsing into Dates settles it), presenter section ids
 arrive duplicated, image URLs double their `&` separators, and continuity
 slots (the national anthem) have null section ids and zero duration.
 
-The page weighs ~600 KB, so the server caches the parsed grid for 30 minutes
-and computes "on air now" per request from the cached copy. On a failed
-refresh the previous grid is served for as long as it exists.
+The page weighs ~600 KB, so the grid is cached in two layers: process memory,
+fresh for 30 minutes, and the same Upstash/Redis/file snapshot store the room
+memory sleeps in — a cold start adopts the last scrape instead of hitting
+gbnews.com per instance. A stored grid lives exactly as long as it stays
+relevant: its key expires when its final programme ends, and the loader
+re-checks that horizon for backends without native expiry. "On air now" is
+computed per request from the cached copy, and a failed or empty refresh
+keeps serving the previous grid — memory first, then store — for as long as
+one exists.
 
 ### Container UUIDs
 
