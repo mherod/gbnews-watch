@@ -4,6 +4,8 @@
  * `computeTrends` on a short interval.
  */
 
+import { entityPattern, matchEntityAt } from "./entities";
+
 export const STOPWORDS = new Set(
   ("the a an and or but if then than that this these those they them their there here "
     + "you your yours we our ours us he she him her his it its i me my mine "
@@ -32,6 +34,12 @@ export interface Trend {
   score: number;
   /** Set for two-word phrases; the component words. */
   parts?: string[];
+  /**
+   * Regex-source alternation of every form this trend should highlight/filter
+   * on — set for known entities so the "Conservative" chip still lights up
+   * "Tory". Undefined for ordinary trends (they match their own word).
+   */
+  pattern?: string;
 }
 
 /** The fields `computeTrends` needs from a comment. */
@@ -46,10 +54,14 @@ export interface TrendInput {
   replies?: number;
 }
 
-/** Whole-word, case-insensitive matcher for filtering the feed by a trend. */
-export function termRegex(term: string): RegExp {
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`\\b${escaped}\\b`, "i");
+/**
+ * Whole-word, case-insensitive matcher for filtering the feed by a trend. Pass
+ * a trend's `pattern` (an alias alternation) to match every form of an entity —
+ * so filtering by "Conservative" also catches "Tory".
+ */
+export function termRegex(term: string, pattern?: string): RegExp {
+  const source = pattern ?? term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b(?:${source})\\b`, "i");
 }
 
 const TOKEN = /[\p{L}][\p{L}\p{N}'']*/gu;
@@ -149,6 +161,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   const uni = new Map<string, Stat>();
   const bi = new Map<string, Stat>();
   const conn = new Map<string, Stat>(); // two topics bridged by short stopword glue
+  const ent = new Map<string, Stat>(); // curated known entities (NHS, Tory→Conservative)
 
   for (const c of comments) {
     const age = now - new Date(c.postedAt).getTime();
@@ -158,16 +171,36 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     // Diminishing engagement weight so a viral comment can't fully dominate.
     const weight = Math.min(6, (c.likes ?? 0) * 0.25 + (c.replies ?? 0) * 0.5);
     const matches = [...c.body.matchAll(TOKEN)];
+    const tokens = matches.map((m) => m[0]);
+
+    // Known-entity pass first: greedily match curated aliases (longest wins),
+    // canonicalise ("Tory" → "Conservative"), and mark the consumed token spans
+    // so the generic passes below skip them. Entities count as strong topics
+    // (cap: true) and reach the candidate list even when 2 letters long (EU).
+    const entIdx = new Set<number>();
+    const seenEnt = new Set<string>();
+    for (let i = 0; i < tokens.length; ) {
+      const hit = matchEntityAt(tokens, i);
+      if (hit) {
+        for (let k = i; k < i + hit.length; k++) entIdx.add(k);
+        seenEnt.add(hit.canonical);
+        i += hit.length;
+      } else {
+        i += 1;
+      }
+    }
+    for (const canonical of seenEnt) record(ent, canonical, canonical, { isRecent, author, weight, cap: true });
 
     // Collect each unique stem once per comment, remembering a display spelling
     // and whether it showed up capitalised anywhere in this comment.
     const seenUni = new Map<string, { display: string; cap: boolean }>();
-    for (const m of matches) {
-      const stem = normalize(m[0]);
+    for (let mi = 0; mi < matches.length; mi++) {
+      if (entIdx.has(mi)) continue; // already claimed by an entity
+      const stem = normalize(tokens[mi]!);
       if (!isContentWord(stem)) continue;
-      const cap = isCapitalized(m[0]);
+      const cap = isCapitalized(tokens[mi]!);
       const prev = seenUni.get(stem);
-      if (!prev) seenUni.set(stem, { display: m[0], cap });
+      if (!prev) seenUni.set(stem, { display: tokens[mi]!, cap });
       else if (cap) prev.cap = true;
     }
     for (const [stem, info] of seenUni) record(uni, stem, info.display, { isRecent, author, weight, cap: info.cap });
@@ -176,6 +209,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     // never bridges punctuation into a phrase.
     const seenBi = new Set<string>();
     for (let i = 0; i + 1 < matches.length; i++) {
+      if (entIdx.has(i) || entIdx.has(i + 1)) continue; // don't bridge into an entity
       const cur = matches[i]!;
       const next = matches[i + 1]!;
       const gap = c.body.slice(cur.index! + cur[0].length, next.index!);
@@ -202,10 +236,12 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     // don't accumulate.
     const seenConn = new Set<string>();
     for (let i = 0; i + 2 < matches.length; i++) {
+      if (entIdx.has(i)) continue; // an entity isn't a bare connective endpoint
       const first = matches[i]!;
       if (!isContentWord(normalize(first[0]))) continue;
       let bridges = 0;
       for (let j = i + 1; j < matches.length && bridges <= 2; j++) {
+        if (entIdx.has(j)) break; // stop at an entity token
         const prev = matches[j - 1]!;
         const cur = matches[j]!;
         const gap = c.body.slice(prev.index! + prev[0].length, cur.index!);
@@ -309,6 +345,21 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   }
 
   const singles: Trend[] = [];
+
+  // Known entities: canonical label, alias-merged count, and an alias-aware
+  // highlight/filter pattern. They already carry the strong proper-noun boost
+  // (recorded with cap: true), so they rank like names without an extra nudge.
+  for (const [key, s] of ent) {
+    const trend: Trend = {
+      word: bestForm(s.forms) ?? key,
+      recent: s.recent,
+      prior: s.prior,
+      score: score(s),
+      pattern: entityPattern(key),
+    };
+    (s.recent >= 2 ? candidates : singles).push(trend);
+  }
+
   for (const [key, s] of uni) {
     if (consumed.has(key)) continue;
     (s.recent >= 2 ? candidates : singles).push(toTrend(key, s, 1));

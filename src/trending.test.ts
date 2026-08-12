@@ -203,3 +203,37 @@ test("termRegex matches whole words and phrases, case-insensitively", () => {
   expect(termRegex("bill").test("a billion pounds")).toBe(false);
   expect(() => termRegex("C++ (test)")).not.toThrow();
 });
+
+test("termRegex with a pattern matches every alias of an entity", () => {
+  const re = termRegex("Conservative", "conservative party|conservatives|conservative|tories|tory");
+  expect(re.test("blame the Tories")).toBe(true);
+  expect(re.test("a Conservative view")).toBe(true);
+  expect(re.test("nothing here")).toBe(false);
+});
+
+test("a two-letter entity surfaces even though the length filter would drop it", () => {
+  const trends = computeTrends(fromMany("the EU is the problem", 3), NOW, { minTrends: 1 });
+  expect(trends.some((t) => t.word === "EU")).toBe(true);
+});
+
+test("merges party aliases into one canonical chip carrying the combined count", () => {
+  const trends = computeTrends(
+    [
+      c("Tory sleaze again", { author: "a" }),
+      c("the Tories are finished", { author: "b" }),
+      c("typical Conservative government", { author: "c" }),
+    ],
+    NOW,
+    { minTrends: 1 },
+  );
+  const con = trends.filter((t) => t.word === "Conservative");
+  expect(con).toHaveLength(1); // one chip, not three
+  expect(con[0]!.recent).toBe(3); // Tory + Tories + Conservative all counted
+  expect(con[0]!.pattern).toContain("tory"); // alias-aware highlight/filter
+  expect(trends.some((t) => t.word.toLowerCase() === "tory")).toBe(false); // no bare alias chip
+});
+
+test("a lowercase ambiguous alias does not conjure an entity", () => {
+  const trends = computeTrends(fromMany("we need reform of the system", 3), NOW, { minTrends: 1 });
+  expect(trends.some((t) => t.word === "Reform UK")).toBe(false); // lowercase 'reform' is the verb
+});

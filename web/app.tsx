@@ -311,6 +311,9 @@ type Span = { start: number; end: number; kind: "trend" | "filter" | "pos" | "ne
 // Trends are interactive, so they win any overlap; sentiment tints fill the gaps.
 const SPAN_PRIORITY: Record<Span["kind"], number> = { filter: 0, trend: 1, neg: 2, pos: 2 };
 
+/** A term to highlight: its display word plus an optional alias-aware regex source. */
+type HlTerm = { word: string; pattern?: string };
+
 /**
  * Renders a comment body with two kinds of highlight: trending terms (accent,
  * clickable to filter) and sentiment — negative words/emoji in red, positive in
@@ -318,20 +321,23 @@ const SPAN_PRIORITY: Record<Span["kind"], number> = { filter: 0, trend: 1, neg: 
  */
 function highlightBody(
   text: string,
-  terms: readonly string[],
+  terms: readonly HlTerm[],
   filterLower: string | null,
   onTerm: (term: string) => void,
 ): ReactNode {
   const spans: Span[] = [];
 
-  // Trend terms (phrases longest-first so they win over their parts).
-  const escaped = [...terms]
-    .filter((t) => t.length >= 3)
-    .sort((a, b) => b.length - a.length)
-    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  if (escaped.length > 0) {
+  // Trend terms — each matches its own word, or an alias-aware pattern for known
+  // entities (so the "Conservative" chip lights up "Tory"). Longest source first
+  // so multi-word/phrase forms win over their parts; entities with a pattern
+  // bypass the length floor so short ones (EU) still highlight.
+  const sources = terms
+    .filter((t) => t.pattern !== undefined || t.word.length >= 3)
+    .map((t) => t.pattern ?? t.word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .sort((a, b) => b.length - a.length);
+  if (sources.length > 0) {
     try {
-      const re = new RegExp(`\\b(${escaped.join("|")})\\b`, "gi");
+      const re = new RegExp(`\\b(${sources.join("|")})\\b`, "gi");
       for (let m = re.exec(text); m !== null; m = re.exec(text)) {
         const isFilter = filterLower !== null && m[0].toLowerCase() === filterLower;
         spans.push({ start: m.index, end: m.index + m[0].length, kind: isFilter ? "filter" : "trend", text: m[0] });
@@ -406,7 +412,7 @@ function highlightBody(
 /** Comment body clamped to a few lines, expandable when it overflows. */
 function CommentBody({ text, terms, termsKey, filterLower, onTerm }: {
   text: string;
-  terms: readonly string[];
+  terms: readonly HlTerm[];
   termsKey: string;
   filterLower: string | null;
   onTerm: (term: string) => void;
@@ -449,7 +455,7 @@ function CommentBody({ text, terms, termsKey, filterLower, onTerm }: {
 
 const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm }: {
   c: CommentView;
-  terms: readonly string[];
+  terms: readonly HlTerm[];
   termsKey: string;
   filterLower: string | null;
   onTerm: (term: string) => void;
@@ -659,17 +665,24 @@ function App() {
     setFilter((cur) => (cur && cur.toLowerCase() === word.toLowerCase() ? null : word));
   }, []);
 
-  // Terms to highlight inside comment bodies: the current trends plus the
-  // active filter. termsKey is a stable string so the per-comment highlight
-  // memo only recomputes when the set actually changes.
-  const highlightTerms = useMemo(() => {
-    const set = new Set<string>();
-    for (const t of trends) set.add(t.word);
-    if (filter) set.add(filter);
-    return [...set];
+  // Terms to highlight inside comment bodies: the current trends (with their
+  // alias-aware entity patterns) plus the active filter. termsKey is a stable
+  // string so the per-comment highlight memo only recomputes when the set
+  // actually changes.
+  const highlightTerms = useMemo<HlTerm[]>(() => {
+    const map = new Map<string, HlTerm>();
+    for (const t of trends) map.set(t.word.toLowerCase(), { word: t.word, pattern: t.pattern });
+    if (filter && !map.has(filter.toLowerCase())) map.set(filter.toLowerCase(), { word: filter });
+    return [...map.values()];
   }, [trends, filter]);
-  const termsKey = highlightTerms.join("|").toLowerCase();
+  const termsKey = highlightTerms.map((t) => t.pattern ?? t.word).join("|").toLowerCase();
   const filterLower = filter?.toLowerCase() ?? null;
+  // Resolve an active filter to its entity pattern so filtering by "Conservative"
+  // also catches "Tory".
+  const filterPattern = useMemo(
+    () => (filterLower ? trends.find((t) => t.word.toLowerCase() === filterLower)?.pattern : undefined),
+    [trends, filterLower],
+  );
 
   // Room mood — recompute when the comment set changes (not every second tick).
   const mood = useMemo(
@@ -720,11 +733,11 @@ function App() {
 
   const filtered = useMemo(() => {
     if (!filter) return views;
-    const re = termRegex(filter);
+    const re = termRegex(filter, filterPattern);
     return views.filter(
       (v) => re.test(v.body) || re.test(v.author) || (v.replyingTo ? re.test(v.replyingTo) : false),
     );
-  }, [views, filter]);
+  }, [views, filter, filterPattern]);
 
   const replyShare = comments.length
     ? Math.round((comments.filter((c) => c.kind === "reply").length / comments.length) * 100)
