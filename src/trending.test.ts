@@ -267,6 +267,26 @@ test("a term repeated by one person is filler, not a real trend", () => {
   expect(rammell?.weak).toBe(true); // but muted — one voice isn't a trend
 });
 
+test("a corpus-confirmed name merges its short form even typed lowercase", () => {
+  // All lowercase, so the capitalisation signal never fires — only the news
+  // cycle knows "andy burnham" is one person's name.
+  const comments = [
+    ...fromMany("burnham has some nerve", 8),
+    ...fromMany("andy burnham at it as usual", 3),
+  ];
+  const corpus = { stems: new Set<string>(), phrases: new Set(["andy burnham"]) };
+
+  const merged = computeTrends(comments, NOW, { corpus, limit: 8 });
+  const hits = merged.filter((t) => t.word.toLowerCase().includes("burnham"));
+  expect(hits).toHaveLength(1); // one person, one chip
+  expect(hits[0]!.word.toLowerCase()).toBe("andy burnham"); // upgraded to the full name
+  expect(hits[0]!.recent).toBeGreaterThanOrEqual(8); // carrying the short form's count
+
+  // Without the corpus the lowercase phrase is dropped as redundant instead.
+  const plain = computeTrends(comments, NOW, { limit: 8 });
+  expect(plain.some((t) => t.word.toLowerCase() === "andy burnham")).toBe(false);
+});
+
 test("a news-cycle corpus term outranks an equal term outside the cycle", () => {
   // Single words so the pair is genuinely tied — a two-content-word body would
   // form its own boosted bigram and decide the race for unrelated reasons.

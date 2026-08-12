@@ -378,7 +378,10 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     if (s.recent < 2) continue;
     const parts = key.split(" ");
     if (parts.every((p) => claimed.has(p))) continue; // both words already in a full-name trigram
-    const isName = s.caps / s.recent >= 0.6;
+    // A name either by the chat's own capitalisation, or vouched for by the
+    // news cycle: "andy burnham" in a headline confirms the merge even when
+    // commenters type it lowercase and the caps signal never fires.
+    const isName = s.caps / s.recent >= 0.6 || (corpus?.phrases.has(key) ?? false);
 
     // Decide before mutating anything: a phrase either speaks for a bare word,
     // or the bare word speaks for it. Showing both is the redundancy that put
