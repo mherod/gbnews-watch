@@ -801,7 +801,9 @@ function App() {
     if (!mem) return;
     const now = Date.now();
     reinforceMemory(mem, comments.map((c) => ({ ...c, id: c.uuid })), trends, now);
-    setGraph(memoryToGraph(mem, { live: new Set(trends.map((t) => t.word.toLowerCase())) }));
+    // A phone-width canvas can't hold a desktop number of bodies legibly.
+    const maxNodes = window.innerWidth < 560 ? 7 : window.innerWidth < 900 ? 11 : 14;
+    setGraph(memoryToGraph(mem, { maxNodes, live: new Set(trends.map((t) => t.word.toLowerCase())) }));
     try {
       localStorage.setItem(MEMORY_KEY, serializeMemory(mem));
     } catch {

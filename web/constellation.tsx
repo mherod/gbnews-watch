@@ -135,10 +135,22 @@ export function Constellation({ graph, filter, onToggle }: {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    /**
+     * Bodies shrink on a small canvas. Without this a phone-width map keeps
+     * desktop-sized nodes, and the repulsion flings half of them past the edges
+     * where they simply can't be read.
+     */
+    const sizeFactor = () => {
+      const { w, h } = sizeRef.current;
+      if (w === 0 || h === 0) return 1;
+      return Math.max(0.52, Math.min(1, Math.min(w, h) / 420));
+    };
+    const nodeRadius = (n: Node) => radius(massOf(n)) * sizeFactor();
+
     const sim = forceSimulation<Node, Link>([])
-      .force("link", forceLink<Node, Link>([]).id((d) => d.id).distance((l) => 150 - Math.min(70, l.weight * 16)).strength((l) => Math.min(0.9, 0.25 + l.weight * 0.12)))
-      .force("charge", forceManyBody<Node>().strength((d) => -170 - radius(massOf(d)) * 9))
-      .force("collide", forceCollide<Node>().radius((d) => radius(massOf(d)) + 14).strength(0.9))
+      .force("link", forceLink<Node, Link>([]).id((d) => d.id).distance((l) => (150 - Math.min(70, l.weight * 16)) * sizeFactor()).strength((l) => Math.min(0.9, 0.25 + l.weight * 0.12)))
+      .force("charge", forceManyBody<Node>().strength((d) => (-170 - nodeRadius(d) * 9) * sizeFactor()))
+      .force("collide", forceCollide<Node>().radius((d) => nodeRadius(d) + 14 * sizeFactor()).strength(0.9))
       .force("x", forceX<Node>().strength(0.045))
       .force("y", forceY<Node>().strength(0.06))
       .stop();
@@ -196,6 +208,19 @@ export function Constellation({ graph, filter, onToggle }: {
       ctx.clearRect(0, 0, w, h);
 
       const nodes = [...nodesRef.current.values()];
+
+      // Keep every body — and its label, which is centred on the node and is
+      // often wider than the circle — inside the canvas. Clamping to the radius
+      // alone still left names like "pull factors" clipped at a phone width.
+      for (const n of nodes) {
+        if (n.x == null || n.y == null) continue;
+        const r = nodeRadius(n) + 4;
+        ctx.font = labelFont(n, r);
+        const halfLabel = ctx.measureText(labelOf(n, w)).width / 2 + 4;
+        const padX = Math.min(Math.max(r, halfLabel), w / 2);
+        n.x = Math.min(Math.max(n.x, padX), Math.max(padX, w - padX));
+        n.y = Math.min(Math.max(n.y, r), Math.max(r, h - r - 16));
+      }
       const active = filterRef.current?.toLowerCase() ?? null;
       const hover = hoverRef.current;
 
@@ -250,7 +275,7 @@ export function Constellation({ graph, filter, onToggle }: {
       // --- bodies ---
       for (const n of nodes) {
         if (n.x == null || n.y == null) continue;
-        const target = radius(massOf(n));
+        const target = nodeRadius(n);
         n.shown += (target - n.shown) * 0.12; // ease toward the new size
         const r = n.shown;
         const colour = tint(n, 1);
@@ -291,13 +316,13 @@ export function Constellation({ graph, filter, onToggle }: {
 
         // label
         ctx.globalAlpha = dim;
-        ctx.font = `${n.weak ? 500 : 650} ${Math.max(11, Math.min(15, r * 0.42))}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.font = labelFont(n, r);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillStyle = n.weak ? faint : ink;
         ctx.shadowColor = "rgba(0,0,0,0.55)";
         ctx.shadowBlur = 6;
-        ctx.fillText(n.label, n.x, n.y);
+        ctx.fillText(labelOf(n, w), n.x, n.y);
         ctx.shadowBlur = 0;
 
         // voices, tucked under the label
@@ -378,6 +403,21 @@ export function Constellation({ graph, filter, onToggle }: {
       {!hasData && <p className="room__empty">Listening for topics to argue about…</p>}
     </div>
   );
+}
+
+/** The font a node's label is drawn in — shared by measuring and rendering. */
+function labelFont(n: Node, r: number): string {
+  return `${n.weak ? 500 : 650} ${Math.max(11, Math.min(15, r * 0.42))}px ui-sans-serif, system-ui, sans-serif`;
+}
+
+/**
+ * A node's label, shortened when the canvas is too narrow to hold it. Long
+ * topics ("stop the boats", "pull factors") otherwise run past both edges on a
+ * phone no matter where the body itself is clamped.
+ */
+function labelOf(n: Node, canvasWidth: number): string {
+  const max = canvasWidth < 380 ? 13 : canvasWidth < 520 ? 18 : 28;
+  return n.label.length > max ? `${n.label.slice(0, max - 1).trimEnd()}…` : n.label;
 }
 
 /** Rounded rect that works without relying on the newer ctx.roundRect. */

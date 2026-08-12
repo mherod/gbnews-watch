@@ -93,6 +93,11 @@ body {
   display: flex;
   align-items: center;
   gap: 20px;
+  /* Wrap rather than push the row wider than the viewport — the rate meter's
+     sparkline is the widest item and used to force a page-level scroll. */
+  flex-wrap: wrap;
+  row-gap: 8px;
+  min-width: 0;
   font-variant-numeric: tabular-nums;
 }
 
@@ -164,6 +169,7 @@ body {
 
 .meter--rate {
   text-align: left;
+  min-width: 0; /* let the sparkline shrink instead of overflowing the row */
 }
 
 .meter__rateline {
@@ -175,6 +181,10 @@ body {
 .spark {
   display: block;
   overflow: visible;
+  /* The markup carries width="135"; scale it fluidly so a narrow viewport
+     shrinks the bars rather than pushing the whole masthead sideways. */
+  width: clamp(72px, 26vw, 135px);
+  height: auto;
 }
 
 .spark__bar {
@@ -265,7 +275,12 @@ body {
   display: flex;
   gap: 8px;
   overflow-x: auto;
+  overscroll-behavior-x: contain; /* don't hand the swipe back to the page */
   scrollbar-width: none;
+  /* A flex item defaults to min-width:auto, which refuses to shrink below its
+     content — the chips row then widened the masthead instead of scrolling. */
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .trends__emoji {
@@ -326,6 +341,37 @@ body {
     margin-left: 0;
     border-left: none;
     padding-left: 0;
+  }
+  /* Signal that the chip row keeps going rather than just clipping a chip. */
+  .trends__chips {
+    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  }
+}
+
+/*
+ * Touch targets. The chips are deliberately small type, so rather than inflate
+ * the masthead we grow the *hit area* with a transparent overlay — a finger
+ * gets the 44px Apple HIG / WCAG target while the design keeps its scale.
+ */
+@media (pointer: coarse) {
+  .trends__chip,
+  .emoji-chip,
+  .room-panel__toggle,
+  .feed__clear {
+    position: relative;
+  }
+
+  .trends__chip::after,
+  .emoji-chip::after,
+  .room-panel__toggle::after,
+  .feed__clear::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
   }
 }
 
@@ -506,7 +552,8 @@ body {
 
 .room {
   position: relative;
-  height: clamp(260px, 42vh, 460px);
+  /* dvh, not vh — vh ignores the iOS URL bar and clipped the canvas on load. */
+  height: clamp(220px, 42dvh, 460px);
   border-top: 1px solid var(--line);
 }
 
@@ -753,7 +800,13 @@ body {
 .replyto__name {
   color: var(--accent);
   font-weight: 600;
-  flex-shrink: 0;
+  /* Display names are user content and can be absurd ("Baron Burnham Von
+     Eyelash Formerly Uturn-Backstabba"). flex-shrink:0 let one push the whole
+     page sideways, so truncate instead of refusing to shrink. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .replyto__quote {
