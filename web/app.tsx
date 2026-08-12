@@ -550,12 +550,63 @@ function StatTile({ value, label, className }: { value: number; label: string; c
   );
 }
 
+/** How long a ▲/▼ rank-change caret stays on a chip. */
+const CARET_MS = 2600;
+
 function TrendBar({ trends, filter, onToggle, emoji }: {
   trends: Trend[];
   filter: string | null;
   onToggle: (word: string) => void;
   emoji: EmojiCount[];
 }) {
+  const chipRefs = useRef(new Map<string, HTMLButtonElement>());
+  const prevLeft = useRef(new Map<string, number>());
+  const prevRank = useRef(new Map<string, number>());
+  const [moves, setMoves] = useState<Record<string, "up" | "down">>({});
+  // Identity of the current order — the effect only runs when it actually changes.
+  const order = trends.map((t) => t.word).join("|");
+
+  // FLIP: the chips have already been laid out at their new positions, so we
+  // invert each one back to where it was and let it play forward. Movement is
+  // read from the DOM rather than tracked in state, so it stays correct when
+  // chips are added, removed, or resized by a changing count.
+  useLayoutEffect(() => {
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const climbed: Record<string, "up" | "down"> = {};
+    const words = new Set<string>();
+
+    trends.forEach((t, i) => {
+      words.add(t.word);
+      const el = chipRefs.current.get(t.word);
+      if (!el) return;
+      const left = el.offsetLeft;
+      const before = prevLeft.current.get(t.word);
+      if (before !== undefined && Math.abs(before - left) > 1 && !reduce) {
+        el.animate(
+          [{ transform: `translateX(${before - left}px)` }, { transform: "translateX(0)" }],
+          { duration: 380, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+        );
+      }
+      prevLeft.current.set(t.word, left);
+      const was = prevRank.current.get(t.word);
+      if (was !== undefined && was !== i) climbed[t.word] = i < was ? "up" : "down";
+    });
+
+    // Forget chips that have left the row so the maps don't grow unbounded.
+    for (const key of [...prevLeft.current.keys()]) if (!words.has(key)) prevLeft.current.delete(key);
+    for (const key of [...chipRefs.current.keys()]) if (!words.has(key)) chipRefs.current.delete(key);
+    prevRank.current = new Map(trends.map((t, i) => [t.word, i]));
+
+    if (Object.keys(climbed).length > 0) setMoves(climbed);
+  }, [order]);
+
+  // Carets are a momentary signal, not a permanent badge — clear them.
+  useEffect(() => {
+    if (Object.keys(moves).length === 0) return;
+    const id = setTimeout(() => setMoves({}), CARET_MS);
+    return () => clearTimeout(id);
+  }, [moves]);
+
   if (trends.length === 0 && emoji.length === 0) return null;
   // When every chip is single-voice filler, nothing is really trending — say so.
   const allWeak = trends.length > 0 && trends.every((t) => t.weak);
@@ -566,15 +617,28 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
       <div className="trends__chips">
         {trends.map((t) => {
           const active = filter?.toLowerCase() === t.word.toLowerCase();
+          const moved = moves[t.word];
           return (
             <button
               key={t.word}
+              ref={(el) => {
+                if (el) chipRefs.current.set(t.word, el);
+                else chipRefs.current.delete(t.word);
+              }}
               type="button"
               className={`trends__chip${active ? " trends__chip--active" : ""}${t.weak ? " trends__chip--weak" : ""}`}
               aria-pressed={active}
               title={active ? `Clear filter` : t.weak ? `Only one voice so far — filter to “${t.word}”` : `Filter to “${t.word}”`}
               onClick={() => onToggle(t.word)}
             >
+              {moved && (
+                <b
+                  className={`trends__caret trends__caret--${moved}`}
+                  aria-label={moved === "up" ? "rising" : "falling"}
+                >
+                  {moved === "up" ? "▲" : "▼"}
+                </b>
+              )}
               {t.word}
               <i>{t.recent}</i>
             </button>

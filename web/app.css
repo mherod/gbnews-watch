@@ -379,6 +379,46 @@ body {
   color: #fff;
 }
 
+/* Momentary ▲/▼ shown on a chip that just changed rank. */
+.trends__caret {
+  font-size: 8px;
+  line-height: 1;
+  font-weight: 700;
+  margin-right: -2px;
+  animation: caret-in 0.3s ease both;
+}
+
+.trends__caret--up {
+  color: var(--live);
+}
+
+.trends__caret--down {
+  color: var(--ink-faint);
+}
+
+.trends__chip--active .trends__caret {
+  color: rgb(255 255 255 / 0.9);
+}
+
+@keyframes caret-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--caret-from, 3px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.trends__caret--up {
+  --caret-from: 3px;
+}
+
+.trends__caret--down {
+  --caret-from: -3px;
+}
+
 /* Single-voice filler: muted so it never reads as a genuine trend. */
 .trends__chip--weak {
   background: color-mix(in srgb, var(--ink-faint) 12%, transparent);
