@@ -16,6 +16,18 @@ import type { ServerMessage, Stats, WireComment } from "../src/wire";
 import { computeTrends, mergeStickyTrends, termRegex, type StickyEntry, type Trend } from "../src/trending";
 import { roomMood, emojiSentiment, LEXICON, type Mood } from "../src/sentiment";
 import { isEmoji, topEmoji, type EmojiCount } from "../src/emoji";
+import type { TopicGraph } from "../src/graph";
+import {
+  deserializeMemory,
+  memoryToGraph,
+  reinforceMemory,
+  serializeMemory,
+  type TopicMemory,
+} from "../src/memory";
+import { Constellation } from "./constellation";
+
+/** Where the association memory is kept between visits. */
+const MEMORY_KEY = "gbnews-watch:topic-memory:v2";
 
 const FEED_LIMIT = 150;
 /** Rolling window the activity sparkline covers. */
@@ -768,6 +780,34 @@ function App() {
     [comments],
   );
   const emoji = useMemo(() => topEmoji(comments, Date.now(), { limit: 5 }), [comments]);
+  const [showRoom, setShowRoom] = useState(true);
+
+  // The association memory behind the constellation. Unlike a rolling window it
+  // is never rebuilt: each new comment reinforces the links it contains and
+  // everything decays with a half-life, so the map keeps learning what this
+  // audience connects. Persisted so a reload resumes rather than starts over.
+  const memoryRef = useRef<TopicMemory | null>(null);
+  if (memoryRef.current === null) {
+    memoryRef.current = deserializeMemory(
+      typeof localStorage === "undefined" ? null : localStorage.getItem(MEMORY_KEY),
+      Date.now(),
+    );
+  }
+  const [graph, setGraph] = useState<TopicGraph>({ nodes: [], links: [] });
+
+  useEffect(() => {
+    if (!showRoom) return;
+    const mem = memoryRef.current;
+    if (!mem) return;
+    const now = Date.now();
+    reinforceMemory(mem, comments.map((c) => ({ ...c, id: c.uuid })), trends, now);
+    setGraph(memoryToGraph(mem, { live: new Set(trends.map((t) => t.word.toLowerCase())) }));
+    try {
+      localStorage.setItem(MEMORY_KEY, serializeMemory(mem));
+    } catch {
+      /* storage full or blocked — the memory still works for this session */
+    }
+  }, [comments, trends, showRoom]);
 
   // Attribute a reply to its thread root's body only when the root is in view
   // and its author matches — otherwise the quote could mislabel a sibling reply.
@@ -840,6 +880,20 @@ function App() {
         emoji={emoji}
       />
       <main className="shell">
+        {comments.length > 0 && (
+          <section className={`room-panel${showRoom ? "" : " room-panel--closed"}`}>
+            <div className="room-panel__bar">
+              <h2 className="room-panel__title">
+                The Room
+                <span>learned over time · tethered when argued in one breath · size = how much it dominates · colour = mood</span>
+              </h2>
+              <button type="button" className="room-panel__toggle" onClick={() => setShowRoom((v) => !v)}>
+                {showRoom ? "Hide map" : "Show map"}
+              </button>
+            </div>
+            {showRoom && <Constellation graph={graph} filter={filter} onToggle={toggleFilter} />}
+          </section>
+        )}
         {comments.length === 0 ? (
           <div className="waiting">
             <div className="waiting__bars" aria-hidden="true">
