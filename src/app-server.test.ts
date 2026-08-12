@@ -1,6 +1,7 @@
-import { expect, test } from "bun:test";
-import { startCommentServer } from "./app-server";
-import type { Programme } from "./schedule";
+import { describe, expect, test } from "bun:test";
+import { createScheduleSupplier, startCommentServer } from "./app-server";
+import type { RoomStore } from "./room-store";
+import { serializeSchedule, type Programme } from "./schedule";
 import type { StreamEvent, StreamedComment } from "./stream";
 import type { ServerMessage } from "./wire";
 
@@ -97,12 +98,25 @@ test("a connecting tab gets a snapshot, then each new comment", async () => {
 
 test("the server learns one shared topic graph and serves it at /api/room", async () => {
   const source = controllableSource();
+  const onAirNow: Programme = {
+    date: "2026-08-12",
+    start: new Date(Date.now() - 60_000),
+    end: new Date(Date.now() + 3_600_000),
+    title: "The Live Show",
+    type: "Live",
+    image: null,
+    presenters: [],
+    description: "",
+    showSectionId: null,
+    presenterSectionIds: [],
+  };
   const server = startCommentServer({
     source,
     html: new Response("ok"),
     port: 0,
     roomTickMs: 20,
     roomCorpus: async () => ({ stems: [], phrases: [] }), // offline in tests
+    schedule: async () => [onAirNow], // offline, and pins what's on air
   });
 
   try {
@@ -120,6 +134,8 @@ test("the server learns one shared topic graph and serves it at /api/room", asyn
     expect(ids).toContain("burnham"); // the shared memory learned the topic
     expect(room.nodes["burnham"].weight).toBeGreaterThan(3.9); // 4 mentions minus ms of decay
     expect(room.seen).toBeUndefined(); // internal dedupe list is not exposed
+    // Learning happened while "The Live Show" was on air — the topic knows it.
+    expect(room.nodes["burnham"].onAir["The Live Show"]).toBeGreaterThan(3.9);
 
     // Two "visitors" read the same shared graph. Weights drift by fractions of
     // a permille between reads because decay is continuous — closeness, not
@@ -175,6 +191,159 @@ test("/api/schedule serves the grid, computing what's on air per request", async
   }
 });
 
+describe("createScheduleSupplier", () => {
+  const programme = (startOffsetMs: number, endOffsetMs: number, title = "Slot"): Programme => ({
+    date: "2026-08-12",
+    start: new Date(Date.now() + startOffsetMs),
+    end: new Date(Date.now() + endOffsetMs),
+    title,
+    type: "Live",
+    image: null,
+    presenters: [],
+    description: "",
+    showSectionId: null,
+    presenterSectionIds: [],
+  });
+
+  /** An in-memory RoomStore that records what the supplier does to it. */
+  function stubStore(initial: string | null) {
+    const activity = { loads: 0, saves: [] as { snapshot: string; expireAtMs?: number }[] };
+    const store: RoomStore = {
+      name: "stub",
+      load: async () => {
+        activity.loads++;
+        return initial;
+      },
+      save: async (snapshot, opts) => {
+        activity.saves.push({ snapshot, expireAtMs: opts?.expireAtMs });
+      },
+    };
+    return { store, activity };
+  }
+
+  test("a cold start adopts a fresh stored snapshot without touching the origin", async () => {
+    const stored = [programme(-60_000, 3_600_000, "Restored")];
+    const { store, activity } = stubStore(serializeSchedule({ fetchedAt: Date.now() - 1_000, programmes: stored }));
+    let scrapes = 0;
+    const supplier = createScheduleSupplier({
+      store,
+      fetchGrid: async () => {
+        scrapes++;
+        return [programme(-60_000, 3_600_000, "Scraped")];
+      },
+    });
+
+    const grid = await supplier();
+    expect(grid.map((p) => p.title)).toEqual(["Restored"]);
+    expect(scrapes).toBe(0);
+    expect(activity.loads).toBe(1);
+    // Still within the memory TTL — the store is not re-read either.
+    await supplier();
+    expect(activity.loads).toBe(1);
+  });
+
+  test("a stale-but-relevant snapshot triggers a refresh and covers its failure", async () => {
+    const stored = [programme(-60_000, 3_600_000, "Stale but relevant")];
+    const { store } = stubStore(serializeSchedule({ fetchedAt: Date.now() - 60_000, programmes: stored }));
+    let scrapes = 0;
+    const supplier = createScheduleSupplier({
+      store,
+      ttlMs: 10_000, // the stored snapshot is 60s old — beyond freshness
+      fetchGrid: async () => {
+        scrapes++;
+        throw new Error("origin down");
+      },
+    });
+
+    const grid = await supplier();
+    expect(scrapes).toBe(1); // it did try to refresh
+    expect(grid.map((p) => p.title)).toEqual(["Stale but relevant"]); // and fell back
+  });
+
+  test("a successful scrape is saved with expiry at the grid's horizon", async () => {
+    const scraped = [programme(-60_000, 3_600_000, "First"), programme(3_600_000, 7_200_000, "Last")];
+    const { store, activity } = stubStore(null);
+    const supplier = createScheduleSupplier({ store, fetchGrid: async () => scraped });
+
+    await supplier();
+    expect(activity.saves).toHaveLength(1);
+    expect(activity.saves[0]!.expireAtMs).toBe(scraped[1]!.end.getTime());
+    expect(activity.saves[0]!.snapshot).toContain("Last");
+  });
+
+  test("an expired snapshot is ignored and an empty scrape is not persisted", async () => {
+    const ended = [programme(-7_200_000, -3_600_000, "Over")];
+    const { store, activity } = stubStore(serializeSchedule({ fetchedAt: Date.now() - 1_000, programmes: ended }));
+    const supplier = createScheduleSupplier({ store, fetchGrid: async () => [] });
+
+    const grid = await supplier();
+    expect(grid).toEqual([]); // the ended grid never surfaces
+    expect(activity.saves).toHaveLength(0); // nothing worth persisting
+  });
+
+  test("a successful-but-empty scrape never evicts a relevant grid", async () => {
+    const stored = [programme(-60_000, 3_600_000, "Still relevant")];
+    const { store } = stubStore(serializeSchedule({ fetchedAt: Date.now() - 60_000, programmes: stored }));
+    let scrapes = 0;
+    const supplier = createScheduleSupplier({
+      store,
+      ttlMs: 10_000, // adopted snapshot is already stale, so a refresh runs
+      fetchGrid: async () => {
+        scrapes++;
+        return []; // HTTP 200 wearing an empty body
+      },
+    });
+
+    expect((await supplier()).map((p) => p.title)).toEqual(["Still relevant"]);
+    // The kept grid also kept its old timestamp, so the next call retries
+    // rather than trusting the empty result for a full TTL.
+    expect((await supplier()).map((p) => p.title)).toEqual(["Still relevant"]);
+    expect(scrapes).toBe(2);
+  });
+
+  test("a transient store error at boot does not disarm the restore path", async () => {
+    const stored = [programme(-60_000, 3_600_000, "Recovered")];
+    const snapshot = serializeSchedule({ fetchedAt: Date.now() - 1_000, programmes: stored });
+    let loads = 0;
+    const store: RoomStore = {
+      name: "flaky",
+      load: async () => {
+        loads++;
+        if (loads === 1) throw new Error("timeout");
+        return snapshot;
+      },
+      save: async () => {},
+    };
+    const supplier = createScheduleSupplier({
+      store,
+      fetchGrid: async () => {
+        throw new Error("origin down");
+      },
+    });
+
+    expect(await supplier()).toEqual([]); // both layers down — the safe fallback
+    expect((await supplier()).map((p) => p.title)).toEqual(["Recovered"]); // store retried, grid restored
+    expect(loads).toBe(2);
+  });
+
+  test("a broken store degrades to memory-only, both ways", async () => {
+    const scraped = [programme(-60_000, 3_600_000, "Scraped anyway")];
+    const store: RoomStore = {
+      name: "broken",
+      load: async () => {
+        throw new Error("store down");
+      },
+      save: async () => {
+        throw new Error("store down");
+      },
+    };
+    const supplier = createScheduleSupplier({ store, fetchGrid: async () => scraped });
+
+    const grid = await supplier();
+    expect(grid.map((p) => p.title)).toEqual(["Scraped anyway"]);
+  });
+});
+
 test("the learned graph survives a server restart and doesn't double-count the replayed backfill", async () => {
   // One store shared across two server lifetimes, standing in for Redis.
   let stored: string | null = null;
@@ -194,7 +363,7 @@ test("the learned graph survives a server restart and doesn't double-count the r
   const sourceA = controllableSource();
   const serverA = startCommentServer({
     source: sourceA, html: new Response("ok"), port: 0,
-    roomTickMs: 20, roomCorpus: offline, roomStore: store,
+    roomTickMs: 20, roomCorpus: offline, roomStore: store, schedule: async () => [],
   });
   try {
     for (const c2 of burnhamComments) sourceA.emit({ type: "comment", comment: c2 });
@@ -210,7 +379,7 @@ test("the learned graph survives a server restart and doesn't double-count the r
   const sourceB = controllableSource();
   const serverB = startCommentServer({
     source: sourceB, html: new Response("ok"), port: 0,
-    roomTickMs: 20, roomCorpus: offline, roomStore: store,
+    roomTickMs: 20, roomCorpus: offline, roomStore: store, schedule: async () => [],
   });
   try {
     await Bun.sleep(30); // hydration settles

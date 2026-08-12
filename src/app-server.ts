@@ -1,7 +1,15 @@
 import { buildCorpus, corpusFromJson, corpusToJson, parseRssTitles, type CorpusJson } from "./corpus";
 import { deserializeMemory, emptyMemory, reinforceMemory, serializeMemory } from "./memory";
-import { resolveRoomStore, type RoomStore } from "./room-store";
-import { fetchSchedule, onAirAt, programmeToWire, type Programme } from "./schedule";
+import { resolveRoomStore, resolveSnapshotStore, type RoomStore } from "./room-store";
+import {
+  deserializeSchedule,
+  fetchSchedule,
+  onAirAt,
+  programmeToWire,
+  scheduleHorizon,
+  serializeSchedule,
+  type Programme,
+} from "./schedule";
 import type { StreamEvent, StreamedComment } from "./stream";
 import { computeTrends } from "./trending";
 import type { ServerMessage, Stats, WireComment } from "./wire";
@@ -44,30 +52,99 @@ async function fetchCorpus(): Promise<CorpusJson> {
  * The broadcast schedule, scraped from the /watch/schedule page (see
  * src/schedule.ts for the provenance and its quirks). The page embeds a
  * multi-week grid that changes editorially — on the order of hours — and
- * weighs ~600 KB, so it is cached hard. On failure the previous schedule is
+ * weighs ~600 KB, so it is cached hard, in two layers:
+ *
+ * - process memory, fresh for SCHEDULE_TTL_MS — the hot path;
+ * - the snapshot store (the same Upstash/Redis/file seam the room memory
+ *   sleeps in), so a cold start adopts the last scrape instead of hitting
+ *   gbnews.com per instance. A stored grid is kept for exactly as long as
+ *   it stays relevant: the key expires when its last programme ends, and
+ *   `deserializeSchedule` re-checks that horizon for backends without
+ *   native expiry.
+ *
+ * On a failed refresh the previous grid — memory first, then store — is
  * served for as long as it exists; an empty grid is the safe fallback.
  */
 const SCHEDULE_TTL_MS = 30 * 60_000;
-let scheduleCache: { at: number; data: Programme[] } | null = null;
-let scheduleInFlight: Promise<Programme[]> | null = null;
+const SCHEDULE_KEY = "gbnews-watch:schedule:v1";
+const SCHEDULE_FILE = ".schedule-cache.json";
 
-async function fetchScheduleCached(): Promise<Programme[]> {
-  if (scheduleCache && Date.now() - scheduleCache.at < SCHEDULE_TTL_MS) return scheduleCache.data;
-  // Single flight so a burst of tabs doesn't fan out into parallel page hits.
-  scheduleInFlight ??= (async () => {
-    try {
-      const data = await fetchSchedule();
-      scheduleCache = { at: Date.now(), data };
-      return data;
-    } catch (error) {
-      console.warn("schedule fetch failed:", error);
-      return scheduleCache?.data ?? [];
-    } finally {
-      scheduleInFlight = null;
-    }
-  })();
-  return scheduleInFlight;
+export interface ScheduleSupplierOptions {
+  /** Snapshot store; null runs memory-only. */
+  store?: RoomStore | null;
+  /** The scrape itself — injectable so tests stay offline. */
+  fetchGrid?: () => Promise<Programme[]>;
+  ttlMs?: number;
 }
+
+/**
+ * A self-contained cached schedule supplier. A factory rather than module
+ * state so each test (and each configured store) owns its cache; production
+ * creates one and keeps it for the process lifetime.
+ */
+export function createScheduleSupplier(options: ScheduleSupplierOptions = {}): () => Promise<Programme[]> {
+  const { store = null, fetchGrid = fetchSchedule, ttlMs = SCHEDULE_TTL_MS } = options;
+  let cache: { at: number; data: Programme[] } | null = null;
+  let inFlight: Promise<Programme[]> | null = null;
+  let storeChecked = false;
+
+  return async function scheduleCached(): Promise<Programme[]> {
+    if (cache && Date.now() - cache.at < ttlMs) return cache.data;
+    // Single flight so a burst of tabs doesn't fan out into parallel page hits.
+    inFlight ??= (async () => {
+      try {
+        // Cold start: adopt the last lifetime's scrape before ever touching
+        // the origin. Adopted-but-stale grids still count as cache below, so
+        // a scrape failure right after boot degrades to them, not to empty.
+        if (!storeChecked && store) {
+          try {
+            const raw = await store.load();
+            // Latched only once the store has answered: a transient error at
+            // boot must not disarm the restore path for the process lifetime.
+            storeChecked = true;
+            const snapshot = raw ? deserializeSchedule(raw, Date.now()) : null;
+            if (snapshot) {
+              cache = { at: snapshot.fetchedAt, data: snapshot.programmes };
+              console.log(`schedule restored from ${store.name}: ${snapshot.programmes.length} programmes`);
+              if (Date.now() - snapshot.fetchedAt < ttlMs) return snapshot.programmes;
+            }
+          } catch (error) {
+            console.warn(`schedule restore from ${store.name} failed:`, error);
+          }
+        }
+        const data = await fetchGrid();
+        // A 200 with zero normalisable records is a failure wearing a success
+        // status — the upstream has flip-flopped formats before. Keep the grid
+        // we have (and its old timestamp, so the next call retries).
+        if (data.length === 0 && cache) {
+          console.warn("schedule scrape returned no programmes; keeping the previous grid");
+          return cache.data;
+        }
+        cache = { at: Date.now(), data };
+        if (store && data.length > 0) {
+          try {
+            const horizon = scheduleHorizon(data);
+            await store.save(serializeSchedule({ fetchedAt: cache.at, programmes: data }), {
+              expireAtMs: horizon ?? undefined,
+            });
+          } catch (error) {
+            console.warn(`schedule save to ${store.name} failed:`, error);
+          }
+        }
+        return data;
+      } catch (error) {
+        console.warn("schedule fetch failed:", error);
+        return cache?.data ?? [];
+      } finally {
+        inFlight = null;
+      }
+    })();
+    return inFlight;
+  };
+}
+
+/** The one supplier production servers share; created against the resolved store. */
+let defaultScheduleSupplier: (() => Promise<Programme[]>) | null = null;
 
 export interface CommentServerOptions {
   /** Anything that yields stream events — the live feed, or a stub in tests. */
@@ -101,6 +178,12 @@ export interface CommentServerOptions {
   roomStore?: RoomStore | null;
   /** Schedule supplier for /api/schedule — injectable so tests stay offline. */
   schedule?: () => Promise<Programme[]>;
+  /**
+   * Where the scraped schedule survives cold starts. Undefined resolves from
+   * the environment (the same seam as roomStore); null runs memory-only.
+   * Ignored when `schedule` is given.
+   */
+  scheduleStore?: RoomStore | null;
 }
 
 export interface Asset {
@@ -165,8 +248,18 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
     roomTickMs = 8_000,
     roomCorpus = fetchCorpus,
     roomStore = resolveRoomStore(options.dev ?? false),
-    schedule = fetchScheduleCached,
+    scheduleStore,
   } = options;
+  // A supplied store gets its own supplier (tests must not share cache state);
+  // the environment-resolved default is one process-wide supplier, so every
+  // server instance shares one scrape and one snapshot.
+  const schedule =
+    options.schedule ??
+    (scheduleStore !== undefined
+      ? createScheduleSupplier({ store: scheduleStore })
+      : (defaultScheduleSupplier ??= createScheduleSupplier({
+          store: resolveSnapshotStore(dev, SCHEDULE_KEY, SCHEDULE_FILE),
+        })));
 
   const recent: WireComment[] = [];
   /**
@@ -231,10 +324,14 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
     if (learning || !hydrated || recent.length === 0) return;
     learning = true;
     try {
-      const corpus = corpusFromJson(await roomCorpus());
+      const [corpusJson, grid] = await Promise.all([roomCorpus(), schedule()]);
+      const corpus = corpusFromJson(corpusJson);
       const trends = computeTrends(recent, Date.now(), { limit: 8, corpus });
       reinforceMemory(roomMemory, recent.map((c) => ({ ...c, id: c.uuid })), trends, Date.now(), {
         knownPhrases: corpus.phrases,
+        // Every topic reinforced this tick was argued while this programme was
+        // on — the memory accumulates which broadcasts provoke which topics.
+        onAir: onAirAt(grid)?.title,
       });
       await roomStore?.save(serializeMemory(roomMemory));
     } catch (error) {
