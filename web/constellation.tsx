@@ -33,6 +33,8 @@ interface Node extends SimulationNodeDatum {
   mentions: number;
   sentiment: number | null;
   weak: boolean;
+  /** Broadcasts this topic was argued under, strongest first (see TopicNode). */
+  onAir?: { title: string; share: number }[];
   /** Timestamp of the last mention increase — drives the pulse ring. */
   pulseAt: number;
   /** Eased radius so a growing topic swells rather than snapping. */
@@ -85,7 +87,7 @@ export function Constellation({ graph, filter, onToggle }: {
   // Re-run the data effect only when the graph's shape/values actually change.
   const shape = useMemo(
     () =>
-      graph.nodes.map((n) => `${n.id}:${n.voices}:${n.mentions}:${n.sentiment ?? ""}`).join("|") +
+      graph.nodes.map((n) => `${n.id}:${n.voices}:${n.mentions}:${n.sentiment ?? ""}:${n.onAir?.[0]?.title ?? ""}`).join("|") +
       "//" +
       graph.links.map((l) => `${l.source}-${l.target}:${l.weight}`).join("|"),
     [graph],
@@ -407,6 +409,19 @@ export function Constellation({ graph, filter, onToggle }: {
         ctx.strokeText(voices, n.px, vy);
         ctx.fillStyle = faint;
         ctx.fillText(voices, n.px, vy);
+
+        // On hover, which broadcast the argument belongs to — learned server-
+        // side from what was on air whenever the topic was reinforced. Hover
+        // only: on every body at once it would just be twelve lines of noise.
+        const during = n.onAir?.[0];
+        if (isHovered && during) {
+          const max = canvasWidthChars(w);
+          const title = during.title.length > max ? `${during.title.slice(0, max - 1).trimEnd()}…` : during.title;
+          const line = `during ${title} · ${Math.round(during.share * 100)}%`;
+          ctx.strokeText(line, n.px, vy + 13);
+          ctx.fillStyle = ink;
+          ctx.fillText(line, n.px, vy + 13);
+        }
         ctx.globalAlpha = 1;
       }
 
@@ -504,13 +519,18 @@ function labelFont(n: Node, r: number): string {
   return `${n.weak ? 500 : 650} ${Math.max(11, Math.min(15, r * 0.42))}px ui-sans-serif, system-ui, sans-serif`;
 }
 
+/** How many characters a caption can afford at this canvas width. */
+function canvasWidthChars(canvasWidth: number): number {
+  return canvasWidth < 380 ? 13 : canvasWidth < 520 ? 18 : 28;
+}
+
 /**
  * A node's label, shortened when the canvas is too narrow to hold it. Long
  * topics ("stop the boats", "pull factors") otherwise run past both edges on a
  * phone no matter where the body itself is clamped.
  */
 function labelOf(n: Node, canvasWidth: number): string {
-  const max = canvasWidth < 380 ? 13 : canvasWidth < 520 ? 18 : 28;
+  const max = canvasWidthChars(canvasWidth);
   return n.label.length > max ? `${n.label.slice(0, max - 1).trimEnd()}…` : n.label;
 }
 

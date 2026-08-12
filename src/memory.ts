@@ -39,10 +39,20 @@ export interface MemoryNode {
   sentSum: number;
   sentCount: number;
   lastSeen: number;
+  /**
+   * Which broadcasts this topic was argued under: decayed reinforcement per
+   * programme title, aged exactly like `weight`. The comments carry no
+   * timestamps worth trusting for this — attribution happens at learning time,
+   * against whatever the schedule says is on air *now*.
+   */
+  onAir?: Record<string, number>;
 }
 
 /** Plenty for sizing; past this the exact number stops meaning anything. */
 const MAX_AUTHORS = 16;
+
+/** A topic that outlives this many programmes has stopped being *about* any of them. */
+const MAX_PROGRAMMES = 6;
 
 export interface MemoryEdge {
   weight: number;
@@ -82,6 +92,12 @@ export interface MemoryOptions {
    * justify. Identification signal only; nothing from it is rendered.
    */
   knownPhrases?: ReadonlySet<string>;
+  /**
+   * Title of the programme on air while these comments are being folded in.
+   * Every topic reinforced this pass is attributed to it, building a decayed
+   * picture of which broadcasts provoke which arguments.
+   */
+  onAir?: string;
 }
 
 const HALF_LIFE_MS = 45 * 60_000;
@@ -127,6 +143,13 @@ export function decayMemory(mem: TopicMemory, now: number, opts: MemoryOptions =
     n.weight *= factor;
     n.sentCount *= factor;
     n.sentSum *= factor;
+    if (n.onAir) {
+      for (const [title, w] of Object.entries(n.onAir)) {
+        if (w * factor < floor) delete n.onAir[title];
+        else n.onAir[title] = w * factor;
+      }
+      if (Object.keys(n.onAir).length === 0) delete n.onAir;
+    }
     if (n.weight < floor) delete mem.nodes[id];
   }
   for (const [key, e] of Object.entries(mem.edges)) {
@@ -183,6 +206,7 @@ export function reinforceMemory(
       }
       node.weight += 1;
       node.lastSeen = now;
+      if (opts.onAir) bumpOnAir(node, opts.onAir);
       if (mood !== null) {
         node.sentSum += mood;
         node.sentCount += 1;
@@ -227,6 +251,31 @@ function topicTokens(label: string): Set<string> {
 /** Display form: drop a trailing possessive so a chip reads "Andy Burnham". */
 function prettyLabel(label: string): string {
   return label.replace(/['']s$/, "");
+}
+
+/** One more comment argued this topic under the given broadcast. */
+function bumpOnAir(node: MemoryNode, title: string): void {
+  const buckets = (node.onAir ??= {});
+  buckets[title] = (buckets[title] ?? 0) + 1;
+  const titles = Object.keys(buckets);
+  if (titles.length > MAX_PROGRAMMES) {
+    // The faintest attribution goes — never the one just reinforced.
+    titles.sort((a, b) => buckets[a]! - buckets[b]!);
+    for (const t of titles.slice(0, titles.length - MAX_PROGRAMMES)) delete buckets[t];
+  }
+}
+
+/**
+ * Carries programme attribution across a node merge. Max per title, not sum,
+ * for the same reason weight merges as max: the variants counted the same
+ * comments, so adding their buckets would double the evidence.
+ */
+function mergeOnAir(dst: MemoryNode, src: MemoryNode): void {
+  if (!src.onAir) return;
+  const buckets = (dst.onAir ??= {});
+  for (const [title, w] of Object.entries(src.onAir)) {
+    buckets[title] = Math.max(buckets[title] ?? 0, w);
+  }
 }
 
 /**
@@ -328,6 +377,7 @@ export function consolidateMemory(mem: TopicMemory, opts: MemoryOptions = {}): T
     dst.sentSum += src.sentSum;
     dst.sentCount += src.sentCount;
     dst.lastSeen = Math.max(dst.lastSeen, src.lastSeen);
+    mergeOnAir(dst, src);
     for (const author of src.authors) {
       if (dst.authors.length >= MAX_AUTHORS) break;
       if (!dst.authors.includes(author)) dst.authors.push(author);
@@ -401,6 +451,8 @@ function pairKnownPhrases(mem: TopicMemory, opts: MemoryOptions): TopicMemory {
       dst.sentSum += na.sentSum + nb.sentSum;
       dst.sentCount += na.sentCount + nb.sentCount;
       dst.lastSeen = Math.max(dst.lastSeen, na.lastSeen, nb.lastSeen);
+      mergeOnAir(dst, na);
+      mergeOnAir(dst, nb);
       for (const author of [...na.authors, ...nb.authors]) {
         if (dst.authors.length >= MAX_AUTHORS) break;
         if (!dst.authors.includes(author)) dst.authors.push(author);
@@ -486,6 +538,7 @@ export function memoryToGraph(
     sentiment: n.sentCount >= 0.5 ? n.sentSum / n.sentCount : null,
     // "Weak" now means faded from the live conversation, not merely single-voice.
     weak: live ? !live.has(id.toLowerCase()) : false,
+    onAir: topProgrammes(n),
   }));
 
   const links: TopicLink[] = Object.entries(mem.edges)
@@ -497,6 +550,22 @@ export function memoryToGraph(
     .sort((a, b) => b.weight - a.weight);
 
   return { nodes, links };
+}
+
+/**
+ * A node's programme attribution as the graph wants it: strongest first, as
+ * shares of the topic's total attributed weight — "74% of this argument
+ * happened during X" survives decay, absolute bucket numbers don't mean much.
+ */
+function topProgrammes(n: MemoryNode): TopicNode["onAir"] {
+  if (!n.onAir) return undefined;
+  const entries = Object.entries(n.onAir);
+  const total = entries.reduce((sum, [, w]) => sum + w, 0);
+  if (total <= 0) return undefined;
+  return entries
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([title, w]) => ({ title, share: w / total }));
 }
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

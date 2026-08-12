@@ -276,3 +276,63 @@ test("survives a storage round-trip, and shrugs off junk", () => {
   expect(deserializeMemory("not json", NOW).nodes).toEqual({});
   expect(deserializeMemory(null, NOW).nodes).toEqual({});
 });
+
+test("attributes reinforcement to the programme on air, decaying like everything else", () => {
+  const mem = emptyMemory(NOW);
+  const trends = [t("boats")];
+  reinforceMemory(mem, [c("1", "boats"), c("2", "boats again")], trends, NOW, { onAir: "Breakfast" });
+  reinforceMemory(mem, [c("3", "boats still")], trends, NOW + MIN, { onAir: "Patrick Christys" });
+
+  const buckets = mem.nodes["boats"]!.onAir!;
+  expect(buckets["Breakfast"]).toBeCloseTo(2, 1); // two comments under Breakfast
+  expect(buckets["Patrick Christys"]).toBe(1);
+
+  // A full half-life later the attribution has aged exactly like the weight.
+  decayMemory(mem, NOW + MIN + 45 * MIN, { halfLifeMs: 45 * MIN });
+  expect(mem.nodes["boats"]!.onAir!["Patrick Christys"]).toBeCloseTo(0.5, 5);
+
+  // And long after, the buckets are forgotten with everything else.
+  decayMemory(mem, NOW + 8 * 60 * MIN, { halfLifeMs: 45 * MIN });
+  expect(mem.nodes["boats"]?.onAir).toBeUndefined();
+});
+
+test("a topic without a schedule learns no attribution at all", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "boats")], [t("boats")], NOW); // no onAir known
+  expect(mem.nodes["boats"]!.onAir).toBeUndefined();
+});
+
+test("programme attribution survives a consolidation fold", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Burnham again", "a")], [t("Burnham")], NOW, { onAir: "Headliners" });
+  reinforceMemory(mem, [c("2", "Andy Burnham's speech", "b")], [t("Andy Burnham's")], NOW, { onAir: "Breakfast" });
+
+  const id = Object.keys(mem.nodes).find((k) => k.includes("burnham"))!;
+  const buckets = mem.nodes[id]!.onAir!;
+  // The fold carried both variants' attributions onto the surviving person.
+  expect(buckets["Headliners"]).toBe(1);
+  expect(buckets["Breakfast"]).toBe(1);
+});
+
+test("projects programme shares onto graph nodes, strongest first", () => {
+  const mem = emptyMemory(NOW);
+  const trends = [t("boats")];
+  for (let i = 0; i < 3; i++) reinforceMemory(mem, [c(`b${i}`, "boats", `u${i}`)], trends, NOW, { onAir: "Breakfast" });
+  reinforceMemory(mem, [c("p", "boats", "u9")], trends, NOW, { onAir: "Patrick Christys" });
+
+  const node = memoryToGraph(mem, { minWeight: 0.5 }).nodes[0]!;
+  expect(node.onAir?.map((p) => p.title)).toEqual(["Breakfast", "Patrick Christys"]);
+  expect(node.onAir![0]!.share).toBeCloseTo(0.75, 5); // 3 of 4 attributed comments
+  expect(node.onAir!.reduce((sum, p) => sum + p.share, 0)).toBeCloseTo(1, 5);
+});
+
+test("only a handful of programmes are remembered per topic", () => {
+  const mem = emptyMemory(NOW);
+  const trends = [t("boats")];
+  for (let i = 0; i < 9; i++) {
+    reinforceMemory(mem, [c(`s${i}`, "boats")], trends, NOW, { onAir: `Show ${i}` });
+  }
+  const buckets = mem.nodes["boats"]!.onAir!;
+  expect(Object.keys(buckets).length).toBeLessThanOrEqual(6);
+  expect(buckets["Show 8"]).toBe(1); // the freshest attribution is never the one dropped
+});
