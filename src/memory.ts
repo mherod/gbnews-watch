@@ -21,6 +21,12 @@ import { termRegex, type Trend } from "./trending";
 import type { TopicGraph, TopicNode, TopicLink } from "./graph";
 
 export interface MemoryNode {
+  /**
+   * Nicest spelling seen for this topic. Nodes are keyed case-folded, because
+   * the trend detector picks whichever casing was most common that tick — so
+   * "stop" and "Stop" arrived as two separate remembered topics.
+   */
+  label?: string;
   /** Decayed reinforcement — how much this topic has mattered lately. */
   weight: number;
   /**
@@ -153,13 +159,20 @@ export function reinforceMemory(
     const mood = scoreText(c.body);
 
     for (const label of hits) {
-      const node = (mem.nodes[label] ??= {
+      const id = label.toLowerCase();
+      const node = (mem.nodes[id] ??= {
+        label,
         weight: 0,
         authors: [],
         sentSum: 0,
         sentCount: 0,
         lastSeen: now,
       });
+      // Prefer the capitalised spelling ("Stop" over "stop") once it appears —
+      // proper nouns and acronyms read better on the map.
+      if (!node.label || (label !== label.toLowerCase() && node.label === node.label.toLowerCase())) {
+        node.label = label;
+      }
       node.weight += 1;
       node.lastSeen = now;
       if (mood !== null) {
@@ -176,7 +189,7 @@ export function reinforceMemory(
 
     for (let i = 0; i < hits.length; i++) {
       for (let j = i + 1; j < hits.length; j++) {
-        const key = edgeKey(hits[i]!, hits[j]!);
+        const key = edgeKey(hits[i]!.toLowerCase(), hits[j]!.toLowerCase());
         const edge = (mem.edges[key] ??= { weight: 0, lastSeen: now });
         edge.weight += 1;
         edge.lastSeen = now;
@@ -237,7 +250,7 @@ export function memoryToGraph(
 
   const nodes: TopicNode[] = ranked.map(([id, n]) => ({
     id,
-    label: id,
+    label: n.label ?? id,
     voices: Math.max(1, n.authors?.length ?? 1),
     mentions: Math.round(n.weight),
     sentiment: n.sentCount >= 0.5 ? n.sentSum / n.sentCount : null,

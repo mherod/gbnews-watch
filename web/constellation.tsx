@@ -37,6 +37,11 @@ interface Node extends SimulationNodeDatum {
   pulseAt: number;
   /** Eased radius so a growing topic swells rather than snapping. */
   shown: number;
+  /** Per-node phase so bodies don't drift in lockstep. */
+  drift: number;
+  /** Drawn position (simulation position + idle drift) — hit-testing uses this. */
+  px: number;
+  py: number;
 }
 
 type Link = SimulationLinkDatum<Node> & { weight: number };
@@ -107,6 +112,11 @@ export function Constellation({ graph, filter, onToggle }: {
           y: h / 2 + Math.sin(angle) * (h / 3.2),
           pulseAt: now,
           shown: 0,
+          // Phase derived from the label, so a topic drifts the same way every
+          // session and two bodies never bob in unison.
+          drift: [...n.id].reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 628 / 100,
+          px: w / 2,
+          py: h / 2,
         });
       }
     }
@@ -169,6 +179,12 @@ export function Constellation({ graph, filter, onToggle }: {
     let ink = readVar("--ink", "#e7ecf3");
     let faint = readVar("--ink-faint", "#8b95a4");
     let accent = readVar("--accent", "#7d9cff");
+    let panel = readVar("--panel", "#161b22");
+    let line = readVar("--line", "#262d38");
+    // Labels are stroked in the page background so they stay readable wherever
+    // they land — over a glow, a tether, or another body's halo.
+    let halo = readVar("--bg", "#0e1116");
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const resize = () => {
       const rect = wrap.getBoundingClientRect();
@@ -194,6 +210,9 @@ export function Constellation({ graph, filter, onToggle }: {
       ink = s.getPropertyValue("--ink").trim() || ink;
       faint = s.getPropertyValue("--ink-faint").trim() || faint;
       accent = s.getPropertyValue("--accent").trim() || accent;
+      panel = s.getPropertyValue("--panel").trim() || panel;
+      line = s.getPropertyValue("--line").trim() || line;
+      halo = s.getPropertyValue("--bg").trim() || halo;
     };
     themeQuery.addEventListener("change", onTheme);
 
@@ -209,6 +228,25 @@ export function Constellation({ graph, filter, onToggle }: {
 
       const nodes = [...nodesRef.current.values()];
 
+      // Who the hovered body is tethered to — computed once per frame so the
+      // focus dimming below doesn't rescan every link for every node.
+      let neighbourCache: Set<string> | null = null;
+      const neighbours = (id: string): Set<string> => {
+        if (neighbourCache) return neighbourCache;
+        const set = new Set<string>([id]);
+        for (const l of linksRef.current) {
+          const a = (l.source as Node).id;
+          const b = (l.target as Node).id;
+          if (a === id) set.add(b);
+          else if (b === id) set.add(a);
+        }
+        return (neighbourCache = set);
+      };
+
+      // The legend's footprint. Bodies are kept out of it so the scale is never
+      // buried under a node, as it was under "Mike Parry".
+      const legend = { x: 12, y: h - 40, w: 122, h: 28 };
+
       // Keep every body — and its label, which is centred on the node and is
       // often wider than the circle — inside the canvas. Clamping to the radius
       // alone still left names like "pull factors" clipped at a phone width.
@@ -220,6 +258,16 @@ export function Constellation({ graph, filter, onToggle }: {
         const padX = Math.min(Math.max(r, halfLabel), w / 2);
         n.x = Math.min(Math.max(n.x, padX), Math.max(padX, w - padX));
         n.y = Math.min(Math.max(n.y, r), Math.max(r, h - r - 16));
+
+        if (n.x - r < legend.x + legend.w && n.y + r > legend.y) {
+          n.y = Math.max(r, legend.y - r - 6);
+        }
+
+        // A slow, tiny orbit so the map breathes instead of sitting frozen
+        // between simulation ticks. Purely visual — the physics never sees it.
+        const wobble = reduceMotion ? 0 : 2.4;
+        n.px = n.x + Math.sin(now * 0.00042 + n.drift) * wobble;
+        n.py = n.y + Math.cos(now * 0.00037 + n.drift * 1.7) * wobble;
       }
       const active = filterRef.current?.toLowerCase() ?? null;
       const hover = hoverRef.current;
@@ -232,103 +280,133 @@ export function Constellation({ graph, filter, onToggle }: {
         const lit =
           hover === a.id || hover === b.id ||
           (active !== null && (a.id.toLowerCase() === active || b.id.toLowerCase() === active));
+        // Hovering a body pushes everything it isn't tied to into the background,
+        // so one topic's connections can actually be read out of the tangle.
+        const muted = hover !== null && !lit;
 
         // Bow each tether so crossing pairs stay legible instead of overlapping.
-        const mx = (a.x + b.x) / 2;
-        const my = (a.y + b.y) / 2;
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
+        const mx = (a.px + b.px) / 2;
+        const my = (a.py + b.py) / 2;
+        const dx = b.px - a.px;
+        const dy = b.py - a.py;
         const len = Math.hypot(dx, dy) || 1;
         const cx = mx + (-dy / len) * len * 0.12;
         const cy = my + (dx / len) * len * 0.12;
 
-        const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+        const grad = ctx.createLinearGradient(a.px, a.py, b.px, b.py);
         grad.addColorStop(0, tint(a, 1));
         grad.addColorStop(1, tint(b, 1));
         ctx.strokeStyle = grad;
-        ctx.globalAlpha = lit ? 0.9 : Math.min(0.42, 0.12 + l.weight * 0.05);
-        ctx.lineWidth = Math.min(6, 0.9 + l.weight * 0.8);
+        // Floor raised from 0.12: the tethers are the whole point of the map and
+        // were nearly invisible at low weights.
+        ctx.globalAlpha = muted ? 0.07 : lit ? 0.95 : Math.min(0.6, 0.28 + l.weight * 0.06);
+        ctx.lineWidth = Math.min(6, 1.2 + l.weight * 0.8);
         ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.quadraticCurveTo(cx, cy, b.x, b.y);
+        ctx.moveTo(a.px, a.py);
+        ctx.quadraticCurveTo(cx, cy, b.px, b.py);
         ctx.stroke();
 
         // Motes drifting along the tether — one per co-mention, so a heavily
         // shared pair visibly courses with traffic.
         const motes = Math.min(4, l.weight);
         for (let i = 0; i < motes; i++) {
-          const phase = ((now * 0.00016 + i / motes + len * 0.0007) % 1 + 1) % 1;
-          const t = phase;
+          const t = ((now * 0.00016 + i / motes + len * 0.0007) % 1 + 1) % 1;
           const it = 1 - t;
-          const px = it * it * a.x + 2 * it * t * cx + t * t * b.x;
-          const py = it * it * a.y + 2 * it * t * cy + t * t * b.y;
-          ctx.globalAlpha = (lit ? 0.95 : 0.5) * Math.sin(t * Math.PI); // fade in/out at the ends
+          const mxp = it * it * a.px + 2 * it * t * cx + t * t * b.px;
+          const myp = it * it * a.py + 2 * it * t * cy + t * t * b.py;
+          ctx.globalAlpha = (muted ? 0.12 : lit ? 0.95 : 0.6) * Math.sin(t * Math.PI);
           ctx.fillStyle = tint(t < 0.5 ? a : b, 1);
           ctx.beginPath();
-          ctx.arc(px, py, lit ? 2.6 : 1.9, 0, Math.PI * 2);
+          ctx.arc(mxp, myp, lit ? 2.6 : 1.9, 0, Math.PI * 2);
           ctx.fill();
         }
       }
       ctx.globalAlpha = 1;
 
       // --- bodies ---
-      for (const n of nodes) {
+      // Biggest first so small bodies land on top and never hide behind a giant.
+      for (const n of [...nodes].sort((p, q) => q.shown - p.shown)) {
         if (n.x == null || n.y == null) continue;
         const target = nodeRadius(n);
         n.shown += (target - n.shown) * 0.12; // ease toward the new size
         const r = n.shown;
+        if (r < 0.5) continue;
         const colour = tint(n, 1);
         const isActive = active !== null && n.id.toLowerCase() === active;
-        const dim = active !== null && !isActive ? 0.32 : 1;
+        const isHovered = hover === n.id;
+        const linkedToHover = hover !== null && (isHovered || neighbours(hover).has(n.id));
+        const dim =
+          (active !== null && !isActive ? 0.32 : 1) * (hover !== null && !linkedToHover ? 0.35 : 1);
 
         // pulse ring on a fresh mention
         const age = now - n.pulseAt;
         if (age < PULSE_MS) {
           const p = age / PULSE_MS;
           ctx.beginPath();
-          ctx.arc(n.x, n.y, r + p * 34, 0, Math.PI * 2);
+          ctx.arc(n.px, n.py, r + p * 34, 0, Math.PI * 2);
           ctx.strokeStyle = colour;
           ctx.globalAlpha = (1 - p) * 0.5 * dim;
           ctx.lineWidth = 2;
           ctx.stroke();
         }
 
-        // glow
-        const glow = ctx.createRadialGradient(n.x, n.y, r * 0.2, n.x, n.y, r * 2.5);
-        glow.addColorStop(0, tint(n, 0.5));
+        // Glow, kept tight on faded topics — a wide halo on every body turned
+        // the middle of the map into an indistinct smear.
+        const glowR = r * (n.weak ? 1.7 : 2.4);
+        const glow = ctx.createRadialGradient(n.px, n.py, r * 0.2, n.px, n.py, glowR);
+        glow.addColorStop(0, tint(n, n.weak ? 0.3 : 0.55));
         glow.addColorStop(1, tint(n, 0));
-        ctx.globalAlpha = (n.weak ? 0.3 : 0.75) * dim;
+        ctx.globalAlpha = (n.weak ? 0.22 : 0.7) * dim;
         ctx.fillStyle = glow;
         ctx.beginPath();
-        ctx.arc(n.x, n.y, r * 2.5, 0, Math.PI * 2);
+        ctx.arc(n.px, n.py, glowR, 0, Math.PI * 2);
         ctx.fill();
 
-        // core
-        ctx.globalAlpha = (n.weak ? 0.45 : 1) * dim;
+        // Core, lit from the top-left so a body reads as a sphere rather than a
+        // flat disc — the highlight also separates overlapping nodes.
+        ctx.globalAlpha = (n.weak ? 0.5 : 1) * dim;
+        const body = ctx.createRadialGradient(
+          n.px - r * 0.35, n.py - r * 0.4, r * 0.1,
+          n.px, n.py, r,
+        );
+        body.addColorStop(0, tint(n, n.weak ? 0.5 : 1));
+        body.addColorStop(1, tint(n, n.weak ? 0.22 : 0.72));
         ctx.beginPath();
-        ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = tint(n, n.weak ? 0.35 : 0.9);
+        ctx.arc(n.px, n.py, r, 0, Math.PI * 2);
+        ctx.fillStyle = body;
         ctx.fill();
-        ctx.lineWidth = isActive ? 3 : hover === n.id ? 2.5 : 1.5;
+        ctx.lineWidth = isActive ? 3 : isHovered ? 2.5 : 1.5;
         ctx.strokeStyle = isActive ? accent : colour;
         ctx.stroke();
 
-        // label
+        // Label: inside the body only when it genuinely fits, otherwise beneath
+        // it. Centring every label meant long names ran straight over the rim.
         ctx.globalAlpha = dim;
         ctx.font = labelFont(n, r);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillStyle = n.weak ? faint : ink;
-        ctx.shadowColor = "rgba(0,0,0,0.55)";
-        ctx.shadowBlur = 6;
-        ctx.fillText(labelOf(n, w), n.x, n.y);
-        ctx.shadowBlur = 0;
+        const text = labelOf(n, w);
+        const inside = ctx.measureText(text).width <= r * 1.65;
+        const ty = inside ? n.py : n.py + r + 12;
+        // Stroke in the page colour first: a halo keeps the text readable over
+        // a tether or a neighbour's glow without a muddy drop shadow.
+        ctx.lineJoin = "round";
+        ctx.lineWidth = 3.5;
+        ctx.strokeStyle = halo;
+        ctx.strokeText(text, n.px, ty);
+        ctx.fillStyle = inside && !n.weak ? ink : n.weak ? faint : ink;
+        ctx.fillText(text, n.px, ty);
 
-        // voices, tucked under the label
+        // voices, tucked under whichever position the label took
         ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = halo;
+        const vy = inside ? n.py + r + 12 : ty + 13;
+        const voices = `${n.voices} ${n.voices === 1 ? "voice" : "voices"}`;
+        ctx.strokeText(voices, n.px, vy);
         ctx.fillStyle = faint;
-        ctx.fillText(`${n.voices} ${n.voices === 1 ? "voice" : "voices"}`, n.x, n.y + r + 11);
+        ctx.fillText(voices, n.px, vy);
         ctx.globalAlpha = 1;
       }
 
@@ -337,6 +415,19 @@ export function Constellation({ graph, filter, onToggle }: {
         const lx = 14;
         const ly = h - 20;
         const lw = 104;
+
+        // Seat the scale on its own panel so it stays readable over whatever
+        // the simulation drifts behind it.
+        ctx.globalAlpha = 0.92;
+        ctx.fillStyle = panel;
+        roundRect(ctx, legend.x, legend.y, legend.w, legend.h, 8);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = line;
+        ctx.lineWidth = 1;
+        roundRect(ctx, legend.x, legend.y, legend.w, legend.h, 8);
+        ctx.stroke();
+
         const bar = ctx.createLinearGradient(lx, 0, lx + lw, 0);
         bar.addColorStop(0, heat(-2.5));
         bar.addColorStop(0.5, heat(0));
@@ -363,8 +454,9 @@ export function Constellation({ graph, filter, onToggle }: {
       const x = ev.clientX - rect.left;
       const y = ev.clientY - rect.top;
       for (const n of nodesRef.current.values()) {
-        if (n.x == null || n.y == null) continue;
-        if (Math.hypot(n.x - x, n.y - y) <= n.shown + 4) return n;
+        // Match the drawn position, not the simulation's — otherwise the drift
+        // puts the clickable area slightly off the visible body.
+        if (Math.hypot(n.px - x, n.py - y) <= n.shown + 4) return n;
       }
       return null;
     };
@@ -375,7 +467,9 @@ export function Constellation({ graph, filter, onToggle }: {
     };
     const onClick = (ev: PointerEvent) => {
       const hit = pick(ev);
-      if (hit) onToggle(hit.id);
+      // Filter by the display label, not the case-folded id, so the banner
+      // reads "Stop" rather than "stop".
+      if (hit) onToggle(hit.label);
     };
     const onLeave = () => {
       hoverRef.current = null;

@@ -25,10 +25,10 @@ test("reinforces a link each time two topics are argued together", () => {
   const mem = emptyMemory(NOW);
   const trends = [t("Labour"), t("migrants")];
   reinforceMemory(mem, [c("1", "Labour and migrants")], trends, NOW);
-  expect(mem.edges[edgeKey("Labour", "migrants")]?.weight).toBe(1);
+  expect(mem.edges[edgeKey("labour", "migrants")]?.weight).toBe(1);
 
   reinforceMemory(mem, [c("2", "migrants, blame Labour")], trends, NOW);
-  expect(mem.edges[edgeKey("Labour", "migrants")]?.weight).toBe(2); // accumulated, not recomputed
+  expect(mem.edges[edgeKey("labour", "migrants")]?.weight).toBe(2); // accumulated, not recomputed
 });
 
 test("never counts the same comment twice", () => {
@@ -45,7 +45,7 @@ test("an association survives long after it leaves the live window", () => {
   reinforceMemory(mem, [c("1", "Labour and migrants")], [t("Labour"), t("migrants")], NOW);
   // 20 minutes later nothing new has been said about them at all.
   decayMemory(mem, NOW + 20 * MIN, { halfLifeMs: 45 * MIN });
-  expect(mem.edges[edgeKey("Labour", "migrants")]?.weight).toBeGreaterThan(0.5); // still remembered
+  expect(mem.edges[edgeKey("labour", "migrants")]?.weight).toBeGreaterThan(0.5); // still remembered
 });
 
 test("decays by half over one half-life", () => {
@@ -69,7 +69,7 @@ test("a repeatedly-argued pair outweighs a one-off pair", () => {
     reinforceMemory(mem, [c(`x${i}`, "Labour and migrants", `u${i}`)], trends, NOW);
   }
   reinforceMemory(mem, [c("one", "weather and bins")], trends, NOW);
-  expect(mem.edges[edgeKey("Labour", "migrants")]!.weight).toBeGreaterThan(
+  expect(mem.edges[edgeKey("labour", "migrants")]!.weight).toBeGreaterThan(
     mem.edges[edgeKey("weather", "bins")]!.weight,
   );
 });
@@ -93,12 +93,28 @@ test("a lone commenter posting across many batches stays one voice", () => {
   expect(memoryToGraph(mem, { minWeight: 0.5 }).nodes[0]?.voices).toBe(1); // but one voice
 });
 
+test("remembers one topic per word regardless of casing", () => {
+  // The trend detector picks whichever spelling dominated that tick, so the
+  // same topic arrives as "stop" one moment and "Stop" the next.
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "stop the boats", "a")], [t("stop")], NOW);
+  reinforceMemory(mem, [c("2", "Stop the boats", "b")], [t("Stop")], NOW);
+
+  expect(Object.keys(mem.nodes).filter((k) => k.toLowerCase() === "stop")).toHaveLength(1);
+  expect(mem.nodes["stop"]!.weight).toBe(2); // both mentions on one topic
+  expect(mem.nodes["stop"]!.label).toBe("Stop"); // and the nicer spelling wins
+
+  const graph = memoryToGraph(mem, { minWeight: 0.5 });
+  expect(graph.nodes.filter((n) => n.id === "stop")).toHaveLength(1);
+  expect(graph.nodes[0]!.label).toBe("Stop");
+});
+
 test("projects to a graph, marking topics not currently trending as faded", () => {
   const mem = emptyMemory(NOW);
   const trends = [t("Labour"), t("migrants")];
   reinforceMemory(mem, [c("1", "Labour and migrants")], trends, NOW);
   const graph = memoryToGraph(mem, { minWeight: 0.5, live: new Set(["labour"]) });
-  expect(graph.nodes.find((n) => n.id === "Labour")?.weak).toBe(false);
+  expect(graph.nodes.find((n) => n.id === "labour")?.weak).toBe(false);
   expect(graph.nodes.find((n) => n.id === "migrants")?.weak).toBe(true);
   expect(graph.links).toHaveLength(1);
 });
@@ -116,7 +132,7 @@ test("survives a storage round-trip, and shrugs off junk", () => {
   const mem = emptyMemory(NOW);
   reinforceMemory(mem, [c("1", "Labour and migrants")], [t("Labour"), t("migrants")], NOW);
   const restored = deserializeMemory(serializeMemory(mem), NOW);
-  expect(restored.edges[edgeKey("Labour", "migrants")]?.weight).toBe(1);
+  expect(restored.edges[edgeKey("labour", "migrants")]?.weight).toBe(1);
   expect(deserializeMemory("not json", NOW).nodes).toEqual({});
   expect(deserializeMemory(null, NOW).nodes).toEqual({});
 });

@@ -27,7 +27,7 @@ import {
 import { Constellation } from "./constellation";
 
 /** Where the association memory is kept between visits. */
-const MEMORY_KEY = "gbnews-watch:topic-memory:v2";
+const MEMORY_KEY = "gbnews-watch:topic-memory:v3";
 
 const FEED_LIMIT = 150;
 /** Rolling window the activity sparkline covers. */
