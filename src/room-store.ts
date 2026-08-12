@@ -5,37 +5,77 @@
  * seam only carries snapshots: load once at boot, save after each learning
  * tick. Which backend applies is an environment decision, not a code one:
  *
- * - `REDIS_URL` set → Redis via Bun's built-in client. This is the durable
- *   path on Vercel (e.g. an Upstash integration), where instance memory and
- *   the filesystem both vanish on cold start.
+ * - `KV_REST_API_URL` + `KV_REST_API_TOKEN` (Vercel's Upstash integration) →
+ *   Upstash over REST, via plain fetch. Preferred on serverless: stateless
+ *   requests, so nothing goes stale when the function freezes between
+ *   invocations, and no SDK dependency.
+ * - `REDIS_URL` or `KV_URL` → Redis over TCP via Bun's built-in client
+ *   (handles `rediss://` TLS). For self-hosted Redis or when REST isn't
+ *   available.
  * - dev / self-hosted → a JSON file beside the repo, so `bun --hot` restarts
  *   and laptop reboots don't forget the evening's graph.
- * - neither → no store: the memory is warm-lifetime only, as before.
+ * - none of the above → no store: the memory is warm-lifetime only.
  *
  * A snapshot is `serializeMemory` output verbatim — including `seen`, which is
  * what stops a restart double-counting the comment backfill it replays.
  */
 
 export interface RoomStore {
-  /** A human word for logs ("redis", "file"). */
+  /** A human word for logs ("upstash", "redis", "file:…"). */
   name: string;
   load(): Promise<string | null>;
   save(snapshot: string): Promise<void>;
 }
 
-const REDIS_KEY = "gbnews-watch:room:v1";
+const KEY = "gbnews-watch:room:v1";
 
-/** Redis-backed store using Bun's built-in client (connects via REDIS_URL). */
-export function redisRoomStore(): RoomStore {
+/**
+ * Upstash REST store. GET {base}/get/{key} answers {"result": string|null};
+ * POST {base}/set/{key} with the raw body as the value answers {"result":"OK"}.
+ */
+export function upstashRestRoomStore(baseUrl: string, token: string, key = KEY): RoomStore {
+  const headers = { Authorization: `Bearer ${token}` };
+  const url = (op: string) => `${baseUrl.replace(/\/$/, "")}/${op}/${encodeURIComponent(key)}`;
+  return {
+    name: "upstash",
+    async load() {
+      const res = await fetch(url("get"), { headers, signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`upstash get responded ${res.status}`);
+      const body = (await res.json()) as { result?: string | null; error?: string };
+      if (body.error) throw new Error(`upstash get: ${body.error}`);
+      return body.result ?? null;
+    },
+    async save(snapshot: string) {
+      const res = await fetch(url("set"), {
+        method: "POST",
+        headers,
+        body: snapshot,
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) throw new Error(`upstash set responded ${res.status}`);
+      const body = (await res.json()) as { error?: string };
+      if (body.error) throw new Error(`upstash set: ${body.error}`);
+    },
+  };
+}
+
+/** Redis-over-TCP store using Bun's built-in client (supports rediss:// TLS). */
+export function redisRoomStore(url: string): RoomStore {
+  let client: import("bun").RedisClient | undefined;
+  const connect = async () => {
+    if (!client) {
+      const { RedisClient } = await import("bun");
+      client = new RedisClient(url);
+    }
+    return client;
+  };
   return {
     name: "redis",
     async load() {
-      const { redis } = await import("bun");
-      return redis.get(REDIS_KEY);
+      return (await connect()).get(KEY);
     },
     async save(snapshot: string) {
-      const { redis } = await import("bun");
-      await redis.set(REDIS_KEY, snapshot);
+      await (await connect()).set(KEY, snapshot);
     },
   };
 }
@@ -55,14 +95,16 @@ export function fileRoomStore(path: string): RoomStore {
 }
 
 /**
- * Picks the backend for this environment. Redis wins when configured; a file
- * only makes sense where the filesystem outlives the process (dev), because a
- * serverless /tmp write has exactly the lifetime problem this exists to fix.
+ * Picks the backend for this environment. Upstash REST wins when the Vercel
+ * integration has provisioned it; a TCP URL comes next; a file only makes
+ * sense where the filesystem outlives the process (dev), because a serverless
+ * /tmp write has exactly the lifetime problem this exists to fix.
  */
 export function resolveRoomStore(dev: boolean): RoomStore | null {
-  if (process.env.REDIS_URL) return redisRoomStore();
-  if (dev || process.env.ROOM_MEMORY_FILE) {
-    return fileRoomStore(process.env.ROOM_MEMORY_FILE ?? ".room-memory.json");
-  }
+  const { KV_REST_API_URL, KV_REST_API_TOKEN, REDIS_URL, KV_URL, ROOM_MEMORY_FILE } = process.env;
+  if (KV_REST_API_URL && KV_REST_API_TOKEN) return upstashRestRoomStore(KV_REST_API_URL, KV_REST_API_TOKEN);
+  const tcpUrl = REDIS_URL ?? KV_URL;
+  if (tcpUrl) return redisRoomStore(tcpUrl);
+  if (dev || ROOM_MEMORY_FILE) return fileRoomStore(ROOM_MEMORY_FILE ?? ".room-memory.json");
   return null;
 }
