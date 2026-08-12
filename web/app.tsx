@@ -13,6 +13,7 @@ import {
 } from "react";
 import { createRoot } from "react-dom/client";
 
+import type { WireProgramme } from "../src/schedule";
 import type { ServerMessage, Stats, WireComment } from "../src/wire";
 import { computeTrends, mergeStickyTrends, termRegex, type StickyEntry, type Trend } from "../src/trending";
 import { roomMood, emojiSentiment, LEXICON, type Mood } from "../src/sentiment";
@@ -29,6 +30,14 @@ import { Constellation } from "./constellation";
 
 /** How often the shared server-side memory is re-fetched. */
 const ROOM_POLL_MS = 8_000;
+
+/**
+ * How often the broadcast grid is re-fetched. The route serves a 30-minute
+ * server-side cache behind Cache-Control max-age=60, so polling faster than
+ * this buys nothing; programme handovers are computed client-side between
+ * polls, so they still flip on the second.
+ */
+const SCHEDULE_POLL_MS = 5 * 60_000;
 
 const FEED_LIMIT = 150;
 /** Rolling window the activity sparkline covers. */
@@ -279,6 +288,52 @@ function useCorpus() {
 }
 
 type CorpusRef = ReturnType<typeof useCorpus>;
+
+/**
+ * The broadcast grid from the server's cached scrape of /watch/schedule.
+ * Fetch failures keep the previous grid; an empty grid simply renders no
+ * on-air strip, so the feed never depends on the schedule being reachable.
+ */
+function useSchedule(): WireProgramme[] {
+  const [programmes, setProgrammes] = useState<WireProgramme[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/schedule");
+        if (!res.ok) return;
+        const json = await res.json();
+        if (cancelled) return;
+        if (Array.isArray(json.programmes)) setProgrammes(json.programmes);
+      } catch {
+        /* offline — keep showing the last grid we fetched */
+      }
+    };
+    load();
+    const timer = setInterval(load, SCHEDULE_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+  return programmes;
+}
+
+/**
+ * The programme on air at `now` — the client-side twin of the server's
+ * onAirAt, over wire timestamps: start inclusive, end exclusive, overlaps to
+ * the latest-starting slot, any input order. Runs on the shared 1s clock so
+ * handovers flip on time between schedule polls; a linear scan of a ~300-slot
+ * grid each second costs nothing.
+ */
+function onAirNow(programmes: readonly WireProgramme[], now: number): WireProgramme | undefined {
+  let match: WireProgramme | undefined;
+  for (const p of programmes) {
+    const s = Date.parse(p.start);
+    if (s <= now && now < Date.parse(p.end) && (match === undefined || s >= Date.parse(match.start))) match = p;
+  }
+  return match;
+}
 
 function useTrends(
   comments: WireComment[],
@@ -608,6 +663,34 @@ function StatTile({ value, label, className }: { value: number; label: string; c
   );
 }
 
+const presenterList = new Intl.ListFormat("en-GB", { style: "long", type: "conjunction" });
+
+function endTimeLabel(iso: string) {
+  return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * What the channel is broadcasting right now — the programme the room is
+ * reacting to. Replays are labelled as such so a heated feed under a repeat
+ * isn't mistaken for a reaction to live events.
+ */
+function OnAir({ programme }: { programme: WireProgramme | undefined }) {
+  if (!programme) return null;
+  const live = programme.type.toLowerCase() === "live";
+  return (
+    <div className="onair" title={programme.description || undefined}>
+      <span className={`onair__type${live ? " onair__type--live" : ""}`}>
+        {programme.type || "On air"}
+      </span>
+      <b className="onair__title">{programme.title}</b>
+      {programme.presenters.length > 0 && (
+        <span className="onair__with">with {presenterList.format(programme.presenters)}</span>
+      )}
+      <span className="onair__until">until {endTimeLabel(programme.end)}</span>
+    </div>
+  );
+}
+
 /** How long a ▲/▼ rank-change caret stays on a chip. */
 const CARET_MS = 2600;
 
@@ -727,7 +810,7 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
   );
 }
 
-function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggleFilter, mood, emoji }: {
+function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggleFilter, mood, emoji, onAir }: {
   stats: Stats;
   connected: boolean;
   arrivals: number[];
@@ -738,6 +821,7 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
   onToggleFilter: (word: string) => void;
   mood: Mood | null;
   emoji: EmojiCount[];
+  onAir: WireProgramme | undefined;
 }) {
   const statusClass = connected && stats.upstream === "live"
     ? "status status--live"
@@ -784,6 +868,7 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
           <StatTile value={stats.total} label="session" />
         </div>
       </div>
+      <OnAir programme={onAir} />
       <TrendBar trends={trends} filter={filter} onToggle={onToggleFilter} emoji={emoji} />
     </header>
   );
@@ -795,6 +880,10 @@ function App() {
   const { comments, stats, connected, arrivals, peakPerMinute } = useCommentFeed();
   const now = useNow(1000);
   const corpus = useCorpus();
+  const programmes = useSchedule();
+  // Cheap enough to run on the 1s clock — this is what makes a handover flip
+  // on time even though the grid itself is only polled every few minutes.
+  const onAir = onAirNow(programmes, now);
 
   // The shared association memory, learned server-side from every comment —
   // even while nobody watches — and identical for every visitor. Created
@@ -963,6 +1052,7 @@ function App() {
         onToggleFilter={toggleFilter}
         mood={mood}
         emoji={emoji}
+        onAir={onAir}
       />
       <main className="shell">
         {comments.length > 0 && (

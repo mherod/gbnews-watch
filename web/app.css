@@ -168,6 +168,70 @@ body {
   color: var(--live);
 }
 
+/* What the channel is broadcasting right now, between the meters and the
+   trend chips. One line, truncating from the least important part inward. */
+.onair {
+  max-width: 720px;
+  margin: 8px auto 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.onair__type {
+  align-self: center;
+  font-size: 10.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink-faint) 18%, transparent);
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+.onair__type--live {
+  background: color-mix(in srgb, var(--live) 16%, transparent);
+  /* Pure var(--live) on the tint reads 2.6:1 in light mode — below AA for
+     10.5px text. Mixing toward the ink passes both themes and stays green. */
+  color: color-mix(in srgb, var(--live) 60%, var(--ink));
+}
+
+.onair__title {
+  font-weight: 650;
+  color: var(--ink);
+  /* Truncation is unconditional: a long special's title otherwise widens the
+     page at 561–720px, where the mobile rules don't apply — the same
+     masthead-widening failure the chips row once had. */
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.onair__with {
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  /* Presenters give way three times faster than the title, which is the
+     part worth reading. */
+  flex-shrink: 3;
+}
+
+.onair__until {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
 .meter {
   text-align: right;
   line-height: 1.2;
@@ -1133,5 +1197,10 @@ body {
   }
   .comment__time {
     margin-left: auto;
+  }
+  /* A phone-width line can't hold title + presenters + end time — the end
+     time steps aside; truncation is already unconditional above. */
+  .onair__until {
+    display: none;
   }
 }
