@@ -140,6 +140,12 @@ export interface TrendOptions {
   limit?: number;
   /** Always return this many when the window has enough distinct terms. */
   minTrends?: number;
+  /**
+   * Vocabulary from the current news cycle (RSS headlines). Terms found here
+   * rank higher — the chat reacting to a story the channel is running is very
+   * likely the real topic. Detection weight only; never rendered.
+   */
+  corpus?: { stems: ReadonlySet<string>; phrases: ReadonlySet<string> };
 }
 
 /**
@@ -161,6 +167,19 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   const priorMs = options.priorMs ?? recentMs * 2;
   const limit = options.limit ?? 4;
   const minTrends = options.minTrends ?? 3;
+  const corpus = options.corpus;
+
+  /**
+   * News-cycle boost for a stem key ("bbq", "andy burnham"). A full phrase
+   * match is the strongest signal; all-words-known is a softer one. Kept
+   * modest so the corpus steers ties rather than overruling the room.
+   */
+  const corpusBoost = (stemKey: string): number => {
+    if (!corpus) return 1;
+    if (corpus.phrases.has(stemKey)) return 1.5;
+    const parts = stemKey.split(" ");
+    return parts.every((p) => corpus.stems.has(p)) ? 1.25 : 1;
+  };
 
   const uni = new Map<string, Stat>();
   const bi = new Map<string, Stat>();
@@ -320,7 +339,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     word: bestForm(s.forms) ?? key,
     recent: s.recent,
     prior: s.prior,
-    score: score(s) * boost,
+    score: score(s) * boost * corpusBoost(key),
     authors: s.authors.size,
     parts,
   });
@@ -335,7 +354,14 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   for (const [key, s] of tri) {
     if (s.recent < 2) continue;
     const parts = key.split(" ");
-    candidates.push({ word: bestForm(s.forms) ?? key, recent: s.recent, prior: s.prior, score: score(s) * 1.6, authors: s.authors.size, parts });
+    candidates.push({
+      word: bestForm(s.forms) ?? key,
+      recent: s.recent,
+      prior: s.prior,
+      score: score(s) * 1.6 * corpusBoost(key),
+      authors: s.authors.size,
+      parts,
+    });
     for (const w of parts) {
       claimed.add(w);
       consumed.add(w);
@@ -382,7 +408,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     }
 
     let recent = s.recent;
-    let sc = score(s) * 1.6;
+    let sc = score(s) * 1.6 * corpusBoost(key);
     for (const [part, u] of absorbs) {
       consumed.add(part);
       // Whatever absorbs a word inherits its weight — otherwise a topic
@@ -411,7 +437,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       word: bestForm(s.forms) ?? key,
       recent: Math.max(s.recent, head.recent, tail.recent),
       prior: s.prior,
-      score: Math.max(score(s) * 1.8, score(head), score(tail)),
+      score: Math.max(score(s) * 1.8, score(head), score(tail)) * corpusBoost(key),
       authors: s.authors.size,
       parts: [stems[0]!, stems[stems.length - 1]!],
     };
@@ -464,7 +490,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       word: bestForm(s.forms) ?? key,
       recent: s.recent,
       prior: s.prior,
-      score: score(s),
+      score: score(s) * corpusBoost(key.toLowerCase()),
       authors: s.authors.size,
       pattern: entityPattern(key),
     };

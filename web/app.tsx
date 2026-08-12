@@ -241,15 +241,52 @@ function useNow(intervalMs = 1000) {
  * doesn't flicker) while fresh topics still lead — via a sticky map kept in a
  * ref across ticks.
  */
+/**
+ * News-cycle vocabulary from the server's cached RSS parse. Detection weight
+ * only — nothing from the feed is rendered. Refreshed on the feed's own cadence;
+ * failures leave the empty corpus and the detector simply works unaided.
+ */
+function useCorpus() {
+  const corpus = useRef<{ stems: Set<string>; phrases: Set<string> }>({
+    stems: new Set(),
+    phrases: new Set(),
+  });
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/corpus");
+        if (!res.ok) return;
+        const json = await res.json();
+        if (cancelled) return;
+        corpus.current = {
+          stems: new Set(Array.isArray(json.stems) ? json.stems : []),
+          phrases: new Set(Array.isArray(json.phrases) ? json.phrases : []),
+        };
+      } catch {
+        /* offline or blocked — trends work without the corpus */
+      }
+    };
+    load();
+    const timer = setInterval(load, 10 * 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+  return corpus;
+}
+
 function useTrends(comments: WireComment[]) {
   const [trends, setTrends] = useState<Trend[]>([]);
   const latest = useRef(comments);
   latest.current = comments;
   const sticky = useRef<Map<string, StickyEntry>>(new Map());
+  const corpus = useCorpus();
   useEffect(() => {
     const compute = () => {
       const now = Date.now();
-      const fresh = computeTrends(latest.current, now, { limit: 8 });
+      const fresh = computeTrends(latest.current, now, { limit: 8, corpus: corpus.current });
       setTrends(mergeStickyTrends(fresh, sticky.current, now, { display: 6 }));
     };
     compute();

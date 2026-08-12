@@ -1,7 +1,40 @@
+import { buildCorpus, corpusToJson, parseRssTitles, type CorpusJson } from "./corpus";
 import type { StreamEvent, StreamedComment } from "./stream";
 import type { ServerMessage, Stats, WireComment } from "./wire";
 
 const TOPIC = "comments";
+
+/**
+ * News-cycle vocabulary from the site's own RSS feed, used by the client to
+ * weight topic detection — never rendered. Cached because headlines change on
+ * the order of minutes, not seconds, and the feed shouldn't be hit per visitor.
+ * On failure the previous corpus is served for as long as it exists; the
+ * detector works unaided otherwise, so an empty corpus is a safe fallback.
+ */
+const CORPUS_FEED_URL = "https://www.gbnews.com/feeds/news.rss";
+const CORPUS_TTL_MS = 10 * 60_000;
+let corpusCache: { at: number; data: CorpusJson } | null = null;
+let corpusInFlight: Promise<CorpusJson> | null = null;
+
+async function fetchCorpus(): Promise<CorpusJson> {
+  if (corpusCache && Date.now() - corpusCache.at < CORPUS_TTL_MS) return corpusCache.data;
+  // Single flight so a burst of tabs doesn't fan out into parallel feed hits.
+  corpusInFlight ??= (async () => {
+    try {
+      const res = await fetch(CORPUS_FEED_URL, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`feed responded ${res.status}`);
+      const data = corpusToJson(buildCorpus(parseRssTitles(await res.text())));
+      corpusCache = { at: Date.now(), data };
+      return data;
+    } catch (error) {
+      console.warn("corpus fetch failed:", error);
+      return corpusCache?.data ?? { stems: [], phrases: [] };
+    } finally {
+      corpusInFlight = null;
+    }
+  })();
+  return corpusInFlight;
+}
 
 export interface CommentServerOptions {
   /** Anything that yields stream events — the live feed, or a stub in tests. */
@@ -117,6 +150,10 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
       "/": indexRoute,
       "/api/health": () =>
         Response.json({ ok: true, container: containerUuid, buffered: recent.length, comments: recent, ...stats() }),
+      "/api/corpus": async () =>
+        Response.json(await fetchCorpus(), {
+          headers: { "Cache-Control": "public, max-age=300" },
+        }),
     },
     fetch(request, server) {
       const { pathname } = new URL(request.url);

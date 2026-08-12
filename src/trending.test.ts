@@ -267,6 +267,22 @@ test("a term repeated by one person is filler, not a real trend", () => {
   expect(rammell?.weak).toBe(true); // but muted — one voice isn't a trend
 });
 
+test("a news-cycle corpus term outranks an equal term outside the cycle", () => {
+  // Single words so the pair is genuinely tied — a two-content-word body would
+  // form its own boosted bigram and decide the race for unrelated reasons.
+  const comments = [
+    ...fromMany("hotels", 3),
+    ...fromMany("weather", 3),
+  ];
+  const corpus = { stems: new Set(["hotel"]), phrases: new Set<string>() };
+  const withCorpus = computeTrends(comments, NOW, { corpus, minTrends: 1 });
+  expect(withCorpus[0]?.word.toLowerCase()).toBe("hotels");
+  // Without the corpus the two are genuinely tied — the boost decided it.
+  const without = computeTrends(comments, NOW, { minTrends: 1 });
+  const scores = without.map((t) => t.score);
+  expect(scores[0]).toBe(scores[1]!);
+});
+
 const trend = (word: string, score: number): Trend => ({ word, recent: 3, prior: 0, score, authors: 3 });
 const weak = (word: string, score: number): Trend => ({ word, recent: 1, prior: 0, score, weak: true });
 
