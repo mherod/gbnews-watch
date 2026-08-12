@@ -109,6 +109,55 @@ test("remembers one topic per word regardless of casing", () => {
   expect(graph.nodes[0]!.label).toBe("Stop");
 });
 
+test("folds a bare name into the fuller one remembered separately", () => {
+  // The two spellings peaked at different times, so the per-tick trend merge
+  // never saw them together and both accumulated in memory.
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Burnham again", "a"), c("2", "Burnham once more", "b")], [t("Burnham")], NOW);
+  reinforceMemory(mem, [c("3", "Andy Burnham's speech", "c")], [t("Andy Burnham's")], NOW);
+
+  const ids = Object.keys(mem.nodes);
+  expect(ids.filter((id) => id.includes("burnham"))).toHaveLength(1); // one person
+  const node = mem.nodes[ids.find((id) => id.includes("burnham"))!]!;
+  expect(node.label).toBe("Andy Burnham"); // fuller name, possessive dropped
+  expect(node.weight).toBe(2); // carried, not summed — the mentions overlap
+  expect([...node.authors].sort()).toEqual(["a", "b", "c"]); // every voice kept
+});
+
+test("folds a bare word into the phrase that contains it", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "illegal again", "a")], [t("illegal")], NOW);
+  reinforceMemory(mem, [c("2", "illegal migrants here", "b")], [t("illegal migrants")], NOW);
+
+  const ids = Object.keys(mem.nodes);
+  expect(ids).toContain("illegal migrants");
+  expect(ids).not.toContain("illegal");
+});
+
+test("leaves genuinely different topics alone", () => {
+  const mem = emptyMemory(NOW);
+  const trends = [t("Labour"), t("migrants"), t("France")];
+  reinforceMemory(
+    mem,
+    [c("1", "Labour again", "a"), c("2", "migrants here", "b"), c("3", "France next", "c")],
+    trends,
+    NOW,
+  );
+  expect(Object.keys(mem.nodes).sort()).toEqual(["france", "labour", "migrants"]);
+});
+
+test("re-points edges onto the survivor and drops the self-link", () => {
+  const mem = emptyMemory(NOW);
+  // "Burnham" is tied to "Labour"; the fuller name arrives later.
+  reinforceMemory(mem, [c("1", "Burnham and Labour", "a")], [t("Burnham"), t("Labour")], NOW);
+  reinforceMemory(mem, [c("2", "Andy Burnham and Labour", "b")], [t("Andy Burnham"), t("Labour")], NOW);
+
+  const keys = Object.keys(mem.edges);
+  expect(keys).toHaveLength(1); // not one edge per spelling
+  const [a, b] = keys[0]!.split(String.fromCharCode(31));
+  expect([a, b].sort()).toEqual(["andy burnham", "labour"]);
+});
+
 test("projects to a graph, marking topics not currently trending as faded", () => {
   const mem = emptyMemory(NOW);
   const trends = [t("Labour"), t("migrants")];

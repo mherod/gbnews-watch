@@ -17,7 +17,7 @@
  */
 
 import { scoreText } from "./sentiment";
-import { termRegex, type Trend } from "./trending";
+import { normalize, STOPWORDS, termRegex, type Trend } from "./trending";
 import type { TopicGraph, TopicNode, TopicLink } from "./graph";
 
 export interface MemoryNode {
@@ -198,7 +198,133 @@ export function reinforceMemory(
   }
 
   if (mem.seen.length > maxSeen) mem.seen = mem.seen.slice(-maxSeen);
+  consolidateMemory(mem);
   prune(mem, opts);
+  return mem;
+}
+
+const WORD = /[\p{L}][\p{L}\p{N}'']*/gu;
+
+/** The content words a topic is really made of — casing, possessives, plurals
+ *  and filler words removed, so "Andy Burnham's" and "Burnham" can be compared. */
+function topicTokens(label: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of label.matchAll(WORD)) {
+    const stem = normalize(m[0]);
+    if (stem.length >= 3 && !STOPWORDS.has(stem)) out.add(stem);
+  }
+  return out;
+}
+
+/** Display form: drop a trailing possessive so a chip reads "Andy Burnham". */
+function prettyLabel(label: string): string {
+  return label.replace(/['']s$/, "");
+}
+
+const isSubset = (a: Set<string>, b: Set<string>) => [...a].every((t) => b.has(t));
+
+/**
+ * Folds variant spellings of one topic together.
+ *
+ * The per-tick trend merge only ever sees the topics detected in that tick, so
+ * two spellings that peaked at different times — "Burnham" this evening,
+ * "Andy Burnham's" an hour ago — accumulate as separate remembered topics and
+ * appear on the map as two bodies for one person.
+ *
+ * A topic folds into another when its content words are a subset of the
+ * other's ("burnham" ⊂ "andy burnham"), or when both reduce to the same words
+ * and one is simply the tidier spelling. The fuller label wins, and weight is
+ * carried across rather than summed: a comment saying "Andy Burnham" was
+ * already counted under "Burnham" too, so adding them would double count.
+ */
+export function consolidateMemory(mem: TopicMemory): TopicMemory {
+  const ids = Object.keys(mem.nodes);
+  if (ids.length < 2) return mem;
+
+  const tokens = new Map(ids.map((id) => [id, topicTokens(mem.nodes[id]!.label ?? id)]));
+  // Higher rank absorbs lower: heavier first, then the fuller label, then id
+  // order so the choice is stable and two nodes can never absorb each other.
+  const rank = (id: string): [number, number, string] => [
+    mem.nodes[id]!.weight,
+    tokens.get(id)!.size,
+    id,
+  ];
+  const outranks = (a: string, b: string) => {
+    const [aw, at, ai] = rank(a);
+    const [bw, bt, bi] = rank(b);
+    if (aw !== bw) return aw > bw;
+    if (at !== bt) return at > bt;
+    return ai < bi;
+  };
+
+  const target = new Map<string, string>();
+  for (const a of ids) {
+    const ta = tokens.get(a)!;
+    if (ta.size === 0) continue;
+    let best: string | null = null;
+    for (const b of ids) {
+      if (a === b) continue;
+      const tb = tokens.get(b)!;
+      if (!isSubset(ta, tb)) continue;
+      // Same words: only the tidier/heavier spelling survives. Strict subset:
+      // the longer phrase always wins, however small it is.
+      if (tb.size === ta.size && !outranks(b, a)) continue;
+      if (best === null || outranks(b, best)) best = b;
+    }
+    if (best !== null) target.set(a, best);
+  }
+  if (target.size === 0) return mem;
+
+  // Follow chains ("burnham" → "andy burnham" → "andy burnham speech") to the
+  // final survivor, guarding against a cycle the ranking should already prevent.
+  const resolve = (id: string): string => {
+    const seen = new Set<string>([id]);
+    let cur = id;
+    while (target.has(cur)) {
+      const next = target.get(cur)!;
+      if (seen.has(next)) break;
+      seen.add(next);
+      cur = next;
+    }
+    return cur;
+  };
+
+  for (const [from] of target) {
+    const to = resolve(from);
+    if (to === from) continue;
+    const src = mem.nodes[from];
+    const dst = mem.nodes[to];
+    if (!src || !dst) continue;
+
+    dst.weight = Math.max(dst.weight, src.weight);
+    dst.sentSum += src.sentSum;
+    dst.sentCount += src.sentCount;
+    dst.lastSeen = Math.max(dst.lastSeen, src.lastSeen);
+    for (const author of src.authors) {
+      if (dst.authors.length >= MAX_AUTHORS) break;
+      if (!dst.authors.includes(author)) dst.authors.push(author);
+    }
+    dst.label = prettyLabel(dst.label ?? to);
+    delete mem.nodes[from];
+  }
+
+  // Re-point every edge at the survivors, dropping links a topic now has to
+  // itself, and keeping the strongest weight where two edges collapse into one.
+  for (const key of Object.keys(mem.edges)) {
+    const [a, b] = edgeEnds(key);
+    const ra = resolve(a);
+    const rb = resolve(b);
+    if (ra === a && rb === b) continue;
+    const edge = mem.edges[key]!;
+    delete mem.edges[key];
+    if (ra === rb) continue; // the pair became one topic
+    const merged = edgeKey(ra, rb);
+    const existing = mem.edges[merged];
+    mem.edges[merged] = existing
+      ? { weight: Math.max(existing.weight, edge.weight), lastSeen: Math.max(existing.lastSeen, edge.lastSeen) }
+      : edge;
+  }
+
   return mem;
 }
 
