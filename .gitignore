@@ -35,6 +35,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache
 *.tsbuildinfo
 
+# the dev server's persisted topic-memory snapshot (see src/room-store.ts)
+.room-memory.json
+
 # IntelliJ based IDEs
 .idea
 

@@ -175,6 +175,61 @@ test("/api/schedule serves the grid, computing what's on air per request", async
   }
 });
 
+test("the learned graph survives a server restart and doesn't double-count the replayed backfill", async () => {
+  // One store shared across two server lifetimes, standing in for Redis.
+  let stored: string | null = null;
+  const store = {
+    name: "stub",
+    load: async () => stored,
+    save: async (snapshot: string) => {
+      stored = snapshot;
+    },
+  };
+  const offline = async () => ({ stems: [], phrases: [] });
+  const burnhamComments = Array.from({ length: 4 }, (_, i) =>
+    comment({ uuid: `fixed-${i}`, body: "Burnham is at it again", authorUuid: `a${i}`, author: `Author ${i}` }),
+  );
+
+  // First lifetime: learn, snapshot, die.
+  const sourceA = controllableSource();
+  const serverA = startCommentServer({
+    source: sourceA, html: new Response("ok"), port: 0,
+    roomTickMs: 20, roomCorpus: offline, roomStore: store,
+  });
+  try {
+    for (const c2 of burnhamComments) sourceA.emit({ type: "comment", comment: c2 });
+    await Bun.sleep(80);
+  } finally {
+    sourceA.end();
+    await serverA.stop();
+  }
+  expect(stored).not.toBeNull(); // a snapshot was written
+
+  // Second lifetime: restore before learning, then replay the same backfill —
+  // exactly what happens after a cold start.
+  const sourceB = controllableSource();
+  const serverB = startCommentServer({
+    source: sourceB, html: new Response("ok"), port: 0,
+    roomTickMs: 20, roomCorpus: offline, roomStore: store,
+  });
+  try {
+    await Bun.sleep(30); // hydration settles
+    const restored = await (await fetch(`http://localhost:${serverB.port}/api/room`)).json();
+    expect(Object.keys(restored.nodes)).toContain("burnham"); // knowledge survived death
+
+    for (const c2 of burnhamComments) sourceB.emit({ type: "comment", comment: c2 });
+    await Bun.sleep(80); // learning ticks over the replayed buffer
+
+    const after = await (await fetch(`http://localhost:${serverB.port}/api/room`)).json();
+    // The snapshot's seen-list recognises the replayed uuids: still ~4, not 8.
+    expect(after.nodes["burnham"].weight).toBeLessThan(4.5);
+    expect(after.nodes["burnham"].weight).toBeGreaterThan(3.5);
+  } finally {
+    sourceB.end();
+    await serverB.stop();
+  }
+});
+
 test("the rate meter counts when comments were posted, not when they arrived", async () => {
   const source = controllableSource();
   const server = startCommentServer({ source, html: new Response("ok"), port: 0 });

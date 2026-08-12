@@ -1,5 +1,6 @@
 import { buildCorpus, corpusFromJson, corpusToJson, parseRssTitles, type CorpusJson } from "./corpus";
-import { emptyMemory, reinforceMemory } from "./memory";
+import { deserializeMemory, emptyMemory, reinforceMemory, serializeMemory } from "./memory";
+import { resolveRoomStore, type RoomStore } from "./room-store";
 import { fetchSchedule, onAirAt, programmeToWire, type Programme } from "./schedule";
 import type { StreamEvent, StreamedComment } from "./stream";
 import { computeTrends } from "./trending";
@@ -92,6 +93,12 @@ export interface CommentServerOptions {
   roomTickMs?: number;
   /** Corpus supplier for the room's learning — injectable so tests stay offline. */
   roomCorpus?: () => Promise<CorpusJson>;
+  /**
+   * Where the room memory sleeps between server lifetimes. Undefined resolves
+   * from the environment (Redis on Vercel, a file in dev); null disables
+   * persistence outright.
+   */
+  roomStore?: RoomStore | null;
   /** Schedule supplier for /api/schedule — injectable so tests stay offline. */
   schedule?: () => Promise<Programme[]>;
 }
@@ -157,6 +164,7 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
     dev = false,
     roomTickMs = 8_000,
     roomCorpus = fetchCorpus,
+    roomStore = resolveRoomStore(options.dev ?? false),
     schedule = fetchScheduleCached,
   } = options;
 
@@ -190,15 +198,37 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
    * visitor had their own private graph. Here it learns from every comment the
    * server sees, continuously, and all visitors read the same map.
    *
-   * Honest limits: it lives in function memory, so a cold start begins again,
-   * and concurrent serverless instances each learn independently. Durable
-   * persistence is a separate decision (tracked) — warm-lifetime learning is
-   * already a strict improvement on tab-lifetime learning.
+   * With a store configured it also survives process death: hydrated once at
+   * boot, snapshotted after every learning tick. The snapshot keeps `seen`, so
+   * the comment backfill replayed after a restart is not counted twice, and
+   * `decayedAt`, so downtime ages the graph exactly as elapsed time should.
+   * Without a store (serverless with no REDIS_URL) it is warm-lifetime only.
+   * Learning holds until the hydration attempt settles — otherwise the first
+   * tick could race the load and be wiped by it.
    */
-  const roomMemory = emptyMemory(Date.now());
+  let roomMemory = emptyMemory(Date.now());
+  let hydrated = roomStore === null;
+  if (roomStore) {
+    (async () => {
+      try {
+        const snapshot = await roomStore.load();
+        if (snapshot) {
+          roomMemory = deserializeMemory(snapshot, Date.now());
+          console.log(`room memory restored from ${roomStore.name}: ${Object.keys(roomMemory.nodes).length} topics`);
+        }
+      } catch (error) {
+        console.warn(`room memory restore from ${roomStore.name} failed:`, error);
+      } finally {
+        hydrated = true;
+      }
+    })();
+  }
+
   let learning = false;
   async function learnRoom() {
-    if (learning || recent.length === 0) return; // don't overlap slow corpus fetches
+    // Serialised: no overlap with a slow corpus fetch, and never before the
+    // hydration attempt settles.
+    if (learning || !hydrated || recent.length === 0) return;
     learning = true;
     try {
       const corpus = corpusFromJson(await roomCorpus());
@@ -206,6 +236,7 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
       reinforceMemory(roomMemory, recent.map((c) => ({ ...c, id: c.uuid })), trends, Date.now(), {
         knownPhrases: corpus.phrases,
       });
+      await roomStore?.save(serializeMemory(roomMemory));
     } catch (error) {
       console.warn("room learning tick failed:", error);
     } finally {
