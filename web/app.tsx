@@ -21,15 +21,14 @@ import type { TopicGraph } from "../src/graph";
 import {
   canonicalizeTrends,
   deserializeMemory,
+  emptyMemory,
   memoryToGraph,
-  reinforceMemory,
-  serializeMemory,
   type TopicMemory,
 } from "../src/memory";
 import { Constellation } from "./constellation";
 
-/** Where the association memory is kept between visits. */
-const MEMORY_KEY = "gbnews-watch:topic-memory:v3";
+/** How often the shared server-side memory is re-fetched. */
+const ROOM_POLL_MS = 8_000;
 
 const FEED_LIMIT = 150;
 /** Rolling window the activity sparkline covers. */
@@ -797,15 +796,21 @@ function App() {
   const now = useNow(1000);
   const corpus = useCorpus();
 
-  // The association memory behind the constellation, created before the trends
-  // hook because fresh trends are canonicalised against it — the memory knows
-  // "Burnham" is "Andy Burnham", and the row should say what the map says.
+  // The shared association memory, learned server-side from every comment —
+  // even while nobody watches — and identical for every visitor. Created
+  // before the trends hook because fresh trends are canonicalised against it:
+  // the memory knows "Burnham" is "Andy Burnham", and the row should say what
+  // the map says. Starts empty and fills from the first poll.
   const memoryRef = useRef<TopicMemory | null>(null);
   if (memoryRef.current === null) {
-    memoryRef.current = deserializeMemory(
-      typeof localStorage === "undefined" ? null : localStorage.getItem(MEMORY_KEY),
-      Date.now(),
-    );
+    memoryRef.current = emptyMemory(Date.now());
+    // The graph no longer lives per-browser; clear the orphaned local copies.
+    try {
+      localStorage.removeItem("gbnews-watch:topic-memory:v2");
+      localStorage.removeItem("gbnews-watch:topic-memory:v3");
+    } catch {
+      /* storage blocked — nothing to clean */
+    }
   }
 
   const trends = useTrends(comments, corpus, memoryRef);
@@ -847,25 +852,47 @@ function App() {
   // so the map keeps learning. Persisted so a reload resumes, not restarts.
   const [graph, setGraph] = useState<TopicGraph>({ nodes: [], links: [] });
 
-  useEffect(() => {
-    if (!showRoom) return;
+  // Latest values for the poll loop, which must not restart on every tick.
+  const trendsRef = useRef(trends);
+  trendsRef.current = trends;
+  const showRoomRef = useRef(showRoom);
+  showRoomRef.current = showRoom;
+
+  const rebuildGraph = useCallback(() => {
     const mem = memoryRef.current;
-    if (!mem) return;
-    const now = Date.now();
-    // The corpus lets consolidation join word-pairs the news cycle knows as one
-    // name ("andy" + "burnham"), so the map matches the merged trend row.
-    reinforceMemory(mem, comments.map((c) => ({ ...c, id: c.uuid })), trends, now, {
-      knownPhrases: corpus.current.phrases,
-    });
+    if (!mem || !showRoomRef.current) return;
     // A phone-width canvas can't hold a desktop number of bodies legibly.
     const maxNodes = window.innerWidth < 560 ? 7 : window.innerWidth < 900 ? 11 : 14;
-    setGraph(memoryToGraph(mem, { maxNodes, live: new Set(trends.map((t) => t.word.toLowerCase())) }));
-    try {
-      localStorage.setItem(MEMORY_KEY, serializeMemory(mem));
-    } catch {
-      /* storage full or blocked — the memory still works for this session */
-    }
-  }, [comments, trends, showRoom]);
+    setGraph(memoryToGraph(mem, { maxNodes, live: new Set(trendsRef.current.map((t) => t.word.toLowerCase())) }));
+  }, []);
+
+  // Poll the shared memory the server is learning. Reinforcement no longer
+  // happens here — the server sees every comment whether or not a tab is open,
+  // and every visitor renders this same graph.
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/room");
+        if (!res.ok || cancelled) return;
+        memoryRef.current = deserializeMemory(JSON.stringify(await res.json()), Date.now());
+        rebuildGraph();
+      } catch {
+        /* offline — keep showing the last graph we fetched */
+      }
+    };
+    load();
+    const timer = setInterval(load, ROOM_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [rebuildGraph]);
+
+  // Between polls, keep the live-topic emphasis and the show/hide state fresh.
+  useEffect(() => {
+    rebuildGraph();
+  }, [trends, showRoom, rebuildGraph]);
 
   // Attribute a reply to its thread root's body only when the root is in view
   // and its author matches — otherwise the quote could mislabel a sibling reply.

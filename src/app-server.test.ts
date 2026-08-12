@@ -94,6 +94,43 @@ test("a connecting tab gets a snapshot, then each new comment", async () => {
   }
 });
 
+test("the server learns one shared topic graph and serves it at /api/room", async () => {
+  const source = controllableSource();
+  const server = startCommentServer({
+    source,
+    html: new Response("ok"),
+    port: 0,
+    roomTickMs: 20,
+    roomCorpus: async () => ({ stems: [], phrases: [] }), // offline in tests
+  });
+
+  try {
+    // Distinct authors, one topic — enough for a real (non-filler) trend.
+    for (let i = 0; i < 4; i++) {
+      source.emit({
+        type: "comment",
+        comment: comment({ body: "Burnham is at it again", authorUuid: `a${i}`, author: `Author ${i}` }),
+      });
+    }
+    await Bun.sleep(80); // a few learning ticks
+
+    const room = await (await fetch(`http://localhost:${server.port}/api/room`)).json();
+    const ids = Object.keys(room.nodes);
+    expect(ids).toContain("burnham"); // the shared memory learned the topic
+    expect(room.nodes["burnham"].weight).toBeGreaterThan(3.9); // 4 mentions minus ms of decay
+    expect(room.seen).toBeUndefined(); // internal dedupe list is not exposed
+
+    // Two "visitors" read the same shared graph. Weights drift by fractions of
+    // a permille between reads because decay is continuous — closeness, not
+    // equality, is what "shared" means for a living value.
+    const again = await (await fetch(`http://localhost:${server.port}/api/room`)).json();
+    expect(again.nodes["burnham"].weight).toBeCloseTo(room.nodes["burnham"].weight, 2);
+  } finally {
+    source.end();
+    await server.stop();
+  }
+});
+
 test("the rate meter counts when comments were posted, not when they arrived", async () => {
   const source = controllableSource();
   const server = startCommentServer({ source, html: new Response("ok"), port: 0 });

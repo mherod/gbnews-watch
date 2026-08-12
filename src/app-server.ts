@@ -1,5 +1,7 @@
-import { buildCorpus, corpusToJson, parseRssTitles, type CorpusJson } from "./corpus";
+import { buildCorpus, corpusFromJson, corpusToJson, parseRssTitles, type CorpusJson } from "./corpus";
+import { emptyMemory, reinforceMemory } from "./memory";
 import type { StreamEvent, StreamedComment } from "./stream";
+import { computeTrends } from "./trending";
 import type { ServerMessage, Stats, WireComment } from "./wire";
 
 const TOPIC = "comments";
@@ -56,6 +58,10 @@ export interface CommentServerOptions {
   containerUuid?: string;
   /** Hot reload and console forwarding. Off in production. */
   dev?: boolean;
+  /** How often the shared topic memory learns from the buffer. */
+  roomTickMs?: number;
+  /** Corpus supplier for the room's learning — injectable so tests stay offline. */
+  roomCorpus?: () => Promise<CorpusJson>;
 }
 
 export interface Asset {
@@ -109,7 +115,17 @@ function toWire(comment: StreamedComment): WireComment {
  * websocket without waiting on live GB News traffic.
  */
 export function startCommentServer(options: CommentServerOptions): CommentServer {
-  const { source, html, assets, port = 3000, snapshotSize = 40, containerUuid, dev = false } = options;
+  const {
+    source,
+    html,
+    assets,
+    port = 3000,
+    snapshotSize = 40,
+    containerUuid,
+    dev = false,
+    roomTickMs = 8_000,
+    roomCorpus = fetchCorpus,
+  } = options;
 
   const recent: WireComment[] = [];
   /**
@@ -135,6 +151,36 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
     server.publish(TOPIC, JSON.stringify(message));
   }
 
+  /**
+   * The shared association memory. It used to live per-browser in
+   * localStorage, which meant it only learned while someone watched and every
+   * visitor had their own private graph. Here it learns from every comment the
+   * server sees, continuously, and all visitors read the same map.
+   *
+   * Honest limits: it lives in function memory, so a cold start begins again,
+   * and concurrent serverless instances each learn independently. Durable
+   * persistence is a separate decision (tracked) — warm-lifetime learning is
+   * already a strict improvement on tab-lifetime learning.
+   */
+  const roomMemory = emptyMemory(Date.now());
+  let learning = false;
+  async function learnRoom() {
+    if (learning || recent.length === 0) return; // don't overlap slow corpus fetches
+    learning = true;
+    try {
+      const corpus = corpusFromJson(await roomCorpus());
+      const trends = computeTrends(recent, Date.now(), { limit: 8, corpus });
+      reinforceMemory(roomMemory, recent.map((c) => ({ ...c, id: c.uuid })), trends, Date.now(), {
+        knownPhrases: corpus.phrases,
+      });
+    } catch (error) {
+      console.warn("room learning tick failed:", error);
+    } finally {
+      learning = false;
+    }
+  }
+  const roomTimer = setInterval(learnRoom, roomTickMs);
+
   // In dev, `html` is a Bun bundle mounted at "/" so HMR works. In prod there is
   // no bundle — "/" serves index.html from the inlined assets map.
   const indexRoute =
@@ -154,6 +200,13 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
         Response.json(await fetchCorpus(), {
           headers: { "Cache-Control": "public, max-age=300" },
         }),
+      // The shared topic memory, minus `seen` (an internal dedupe list the
+      // client has no use for). Every visitor renders this same graph.
+      "/api/room": () =>
+        Response.json(
+          { nodes: roomMemory.nodes, edges: roomMemory.edges, decayedAt: roomMemory.decayedAt },
+          { headers: { "Cache-Control": "no-store" } },
+        ),
     },
     fetch(request, server) {
       const { pathname } = new URL(request.url);
@@ -233,6 +286,7 @@ export function startCommentServer(options: CommentServerOptions): CommentServer
     finished,
     stop: async () => {
       clearInterval(heartbeat);
+      clearInterval(roomTimer);
       await server.stop(true);
     },
   };
