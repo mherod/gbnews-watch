@@ -75,6 +75,13 @@ export interface MemoryOptions {
   maxSeen?: number;
   maxNodes?: number;
   maxEdges?: number;
+  /**
+   * Stem-joined phrases known to be real names/topics (from the RSS corpus).
+   * Lets consolidation join two single-word topics — "andy" and "burnham" —
+   * that never co-trended as a phrase, which subset containment alone can't
+   * justify. Identification signal only; nothing from it is rendered.
+   */
+  knownPhrases?: ReadonlySet<string>;
 }
 
 const HALF_LIFE_MS = 45 * 60_000;
@@ -168,9 +175,10 @@ export function reinforceMemory(
         sentCount: 0,
         lastSeen: now,
       });
-      // Prefer the capitalised spelling ("Stop" over "stop") once it appears —
-      // proper nouns and acronyms read better on the map.
-      if (!node.label || (label !== label.toLowerCase() && node.label === node.label.toLowerCase())) {
+      // Keep the best-cased spelling seen so far. The old rule froze on the
+      // first non-lowercase form, so one SHOUTED "BURNHAM" branded the topic
+      // "Andy BURNHAM" forever while the trend row showed "Andy Burnham".
+      if (!node.label || labelQuality(label) > labelQuality(node.label)) {
         node.label = label;
       }
       node.weight += 1;
@@ -198,7 +206,7 @@ export function reinforceMemory(
   }
 
   if (mem.seen.length > maxSeen) mem.seen = mem.seen.slice(-maxSeen);
-  consolidateMemory(mem);
+  consolidateMemory(mem, opts);
   prune(mem, opts);
   return mem;
 }
@@ -221,6 +229,26 @@ function prettyLabel(label: string): string {
   return label.replace(/['']s$/, "");
 }
 
+/**
+ * How readable a spelling is, per word: Title case scores highest, SHOUTING
+ * and lowercase below it — except short all-caps words, which are almost
+ * always genuine acronyms (UK, NHS, UKIP) and rank alongside Title case so a
+ * stray "Uk" can never displace them. Averaged so word count doesn't matter.
+ */
+function labelQuality(label: string): number {
+  const words = label.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 0;
+  let score = 0;
+  for (const w of words) {
+    const first = w[0]!;
+    const capFirst = first !== first.toLowerCase();
+    if (!capFirst) continue; // lowercase: 0
+    if (w !== w.toUpperCase()) score += 2; // Title case
+    else score += w.length <= 4 ? 2 : 1; // acronym vs SHOUTING
+  }
+  return score / words.length;
+}
+
 const isSubset = (a: Set<string>, b: Set<string>) => [...a].every((t) => b.has(t));
 
 /**
@@ -237,7 +265,7 @@ const isSubset = (a: Set<string>, b: Set<string>) => [...a].every((t) => b.has(t
  * carried across rather than summed: a comment saying "Andy Burnham" was
  * already counted under "Burnham" too, so adding them would double count.
  */
-export function consolidateMemory(mem: TopicMemory): TopicMemory {
+export function consolidateMemory(mem: TopicMemory, opts: MemoryOptions = {}): TopicMemory {
   const ids = Object.keys(mem.nodes);
   if (ids.length < 2) return mem;
 
@@ -273,7 +301,7 @@ export function consolidateMemory(mem: TopicMemory): TopicMemory {
     }
     if (best !== null) target.set(a, best);
   }
-  if (target.size === 0) return mem;
+  if (target.size === 0) return pairKnownPhrases(mem, opts);
 
   // Follow chains ("burnham" → "andy burnham" → "andy burnham speech") to the
   // final survivor, guarding against a cycle the ranking should already prevent.
@@ -318,6 +346,82 @@ export function consolidateMemory(mem: TopicMemory): TopicMemory {
     const edge = mem.edges[key]!;
     delete mem.edges[key];
     if (ra === rb) continue; // the pair became one topic
+    const merged = edgeKey(ra, rb);
+    const existing = mem.edges[merged];
+    mem.edges[merged] = existing
+      ? { weight: Math.max(existing.weight, edge.weight), lastSeen: Math.max(existing.lastSeen, edge.lastSeen) }
+      : edge;
+  }
+
+  return pairKnownPhrases(mem, opts);
+}
+
+/**
+ * Joins two single-word topics the news cycle knows as one name. Subset
+ * containment can never merge "andy" and "burnham" — neither contains the
+ * other — but a corpus phrase "andy burnham" is outside evidence that they are
+ * one person, so the pair becomes the phrase node the map should be showing.
+ * Weight is carried as a max (the same comment often mentioned both words) and
+ * their mutual edge dissolves into the merged body.
+ */
+function pairKnownPhrases(mem: TopicMemory, opts: MemoryOptions): TopicMemory {
+  const phrases = opts.knownPhrases;
+  if (!phrases || phrases.size === 0) return mem;
+
+  // Lone-word topics only; multi-word nodes already carry their own identity.
+  const stemOf = new Map<string, string>();
+  for (const id of Object.keys(mem.nodes)) {
+    const t = topicTokens(mem.nodes[id]!.label ?? id);
+    if (t.size === 1) stemOf.set(id, [...t][0]!);
+  }
+  if (stemOf.size < 2) return mem;
+
+  const redirect = new Map<string, string>();
+  const singles = [...stemOf.keys()].sort(); // stable pairing order
+  for (const a of singles) {
+    if (redirect.has(a) || !mem.nodes[a]) continue;
+    for (const b of singles) {
+      if (a === b || redirect.has(b) || !mem.nodes[b]) continue;
+      const phraseId = `${stemOf.get(a)!} ${stemOf.get(b)!}`;
+      if (!phrases.has(phraseId)) continue;
+
+      const na = mem.nodes[a]!;
+      const nb = mem.nodes[b]!;
+      const joined = prettyLabel(`${na.label ?? a} ${nb.label ?? b}`);
+      const dst = (mem.nodes[phraseId] ??= {
+        label: joined,
+        weight: 0,
+        authors: [],
+        sentSum: 0,
+        sentCount: 0,
+        lastSeen: 0,
+      });
+      if (labelQuality(joined) > labelQuality(dst.label ?? phraseId)) dst.label = joined;
+      dst.weight = Math.max(dst.weight, na.weight, nb.weight);
+      dst.sentSum += na.sentSum + nb.sentSum;
+      dst.sentCount += na.sentCount + nb.sentCount;
+      dst.lastSeen = Math.max(dst.lastSeen, na.lastSeen, nb.lastSeen);
+      for (const author of [...na.authors, ...nb.authors]) {
+        if (dst.authors.length >= MAX_AUTHORS) break;
+        if (!dst.authors.includes(author)) dst.authors.push(author);
+      }
+      delete mem.nodes[a];
+      delete mem.nodes[b];
+      redirect.set(a, phraseId);
+      redirect.set(b, phraseId);
+      break;
+    }
+  }
+  if (redirect.size === 0) return mem;
+
+  for (const key of Object.keys(mem.edges)) {
+    const [a, b] = edgeEnds(key);
+    const ra = redirect.get(a) ?? a;
+    const rb = redirect.get(b) ?? b;
+    if (ra === a && rb === b) continue;
+    const edge = mem.edges[key]!;
+    delete mem.edges[key];
+    if (ra === rb) continue; // the pair's own link dissolves into the merged body
     const merged = edgeKey(ra, rb);
     const existing = mem.edges[merged];
     mem.edges[merged] = existing
@@ -393,6 +497,85 @@ export function memoryToGraph(
     .sort((a, b) => b.weight - a.weight);
 
   return { nodes, links };
+}
+
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Gives live trends the identity the memory has already worked out, so the
+ * trend row and the map tell one story. A fresh tick that only saw "Burnham"
+ * is relabelled "Andy Burnham" when the memory holds that consolidated topic —
+ * and two fresh trends resolving to the same person collapse into one chip.
+ *
+ * The relabelled trend keeps a pattern that still matches its short form:
+ * highlighting, filtering and — critically — the memory's own reinforcement
+ * must keep matching comments that just say "Burnham", or the consolidated
+ * topic would starve and decay while it is at its hottest.
+ *
+ * As a side effect, a better-cased fresh word heals the remembered label
+ * word-by-word, so a "BURNHAM" shouted into the memory recovers to "Burnham"
+ * from live Title-cased evidence.
+ */
+export function canonicalizeTrends(mem: TopicMemory, trends: readonly Trend[]): Trend[] {
+  const ids = Object.keys(mem.nodes);
+  if (ids.length === 0 || trends.length === 0) return [...trends];
+
+  const nodeTokens = new Map(ids.map((id) => [id, topicTokens(mem.nodes[id]!.label ?? id)]));
+  const byNode = new Map<string, Trend>();
+  const out: Trend[] = [];
+
+  for (const t of trends) {
+    const tt = topicTokens(t.word);
+    let best: string | null = null;
+    if (tt.size > 0) {
+      for (const id of ids) {
+        const nt = nodeTokens.get(id)!;
+        if (nt.size <= tt.size || !isSubset(tt, nt)) continue;
+        // Smallest strict superset wins; weight settles ties deterministically.
+        if (
+          best === null ||
+          nt.size < nodeTokens.get(best)!.size ||
+          (nt.size === nodeTokens.get(best)!.size && mem.nodes[id]!.weight > mem.nodes[best]!.weight)
+        ) {
+          best = id;
+        }
+      }
+    }
+    if (best === null) {
+      out.push(t);
+      continue;
+    }
+
+    const node = mem.nodes[best]!;
+    // Heal the remembered casing from live evidence, word by word.
+    if (node.label) {
+      node.label = node.label
+        .split(/\s+/)
+        .map((w) => {
+          if (normalize(w) !== normalize(t.word) || t.word.includes(" ")) return w;
+          return labelQuality(t.word) > labelQuality(w) ? t.word : w;
+        })
+        .join(" ");
+    }
+
+    const word = prettyLabel(node.label ?? best);
+    const pattern = [t.pattern ?? escapeRegex(t.word.toLowerCase()), escapeRegex(word.toLowerCase())].join("|");
+    const existing = byNode.get(best);
+    if (existing) {
+      // Two fresh trends resolved to the same topic — one chip, not two.
+      existing.recent = Math.max(existing.recent, t.recent);
+      existing.score = Math.max(existing.score, t.score);
+      existing.authors = Math.max(existing.authors ?? 0, t.authors ?? 0);
+      existing.pattern = [existing.pattern, escapeRegex(t.word.toLowerCase())].filter(Boolean).join("|");
+      if (t.weak === false || existing.weak === false) existing.weak = undefined;
+      continue;
+    }
+    const canonical: Trend = { ...t, word, pattern };
+    byNode.set(best, canonical);
+    out.push(canonical);
+  }
+
+  return out;
 }
 
 /** Round-trips the memory through storage, tolerating anything malformed. */

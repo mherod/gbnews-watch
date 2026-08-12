@@ -320,6 +320,28 @@ test("a topic lingers for the dwell time after it stops trending", () => {
   expect(at3m.map((t) => t.word)).not.toContain("eclipse");
 });
 
+test("a fresh merged topic evicts its lingering short forms from the row", () => {
+  const sticky = new Map<string, StickyEntry>();
+  const t0 = 1_000_000;
+  // Earlier ticks trended the fragments separately.
+  mergeStickyTrends([trend("Cambridge", 6), trend("Andy", 4), trend("Burnham", 5)], sticky, t0, { stickyMs: 180_000 });
+
+  // Now the detector merges them into full topics.
+  const next = mergeStickyTrends(
+    [trend("Cambridge University", 8), trend("Andy Burnham", 7), trend("Labour", 5)],
+    sticky,
+    t0 + 30_000,
+    { stickyMs: 180_000 },
+  );
+  const words = next.map((t) => t.word);
+  expect(words).toContain("Cambridge University");
+  expect(words).toContain("Andy Burnham");
+  expect(words).not.toContain("Cambridge"); // subsumed fragments are gone
+  expect(words).not.toContain("Andy");
+  expect(words).not.toContain("Burnham");
+  expect(words).toContain("Labour"); // unrelated topics untouched
+});
+
 test("a fresh topic still takes the lead over lingering ones", () => {
   const sticky = new Map<string, StickyEntry>();
   const t0 = 1_000_000;

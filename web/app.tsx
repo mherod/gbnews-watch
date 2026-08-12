@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MutableRefObject,
   type ReactNode,
 } from "react";
 import { createRoot } from "react-dom/client";
@@ -18,6 +19,7 @@ import { roomMood, emojiSentiment, LEXICON, type Mood } from "../src/sentiment";
 import { isEmoji, topEmoji, type EmojiCount } from "../src/emoji";
 import type { TopicGraph } from "../src/graph";
 import {
+  canonicalizeTrends,
   deserializeMemory,
   memoryToGraph,
   reinforceMemory,
@@ -277,16 +279,24 @@ function useCorpus() {
   return corpus;
 }
 
-function useTrends(comments: WireComment[]) {
+type CorpusRef = ReturnType<typeof useCorpus>;
+
+function useTrends(
+  comments: WireComment[],
+  corpus: CorpusRef,
+  memory: MutableRefObject<TopicMemory | null>,
+) {
   const [trends, setTrends] = useState<Trend[]>([]);
   const latest = useRef(comments);
   latest.current = comments;
   const sticky = useRef<Map<string, StickyEntry>>(new Map());
-  const corpus = useCorpus();
   useEffect(() => {
     const compute = () => {
       const now = Date.now();
-      const fresh = computeTrends(latest.current, now, { limit: 8, corpus: corpus.current });
+      let fresh = computeTrends(latest.current, now, { limit: 8, corpus: corpus.current });
+      // The memory has already consolidated identities ("Burnham" is "Andy
+      // Burnham") — adopt them so the row and the map tell one story.
+      if (memory.current) fresh = canonicalizeTrends(memory.current, fresh);
       setTrends(mergeStickyTrends(fresh, sticky.current, now, { display: 6 }));
     };
     compute();
@@ -785,7 +795,20 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
 function App() {
   const { comments, stats, connected, arrivals, peakPerMinute } = useCommentFeed();
   const now = useNow(1000);
-  const trends = useTrends(comments);
+  const corpus = useCorpus();
+
+  // The association memory behind the constellation, created before the trends
+  // hook because fresh trends are canonicalised against it — the memory knows
+  // "Burnham" is "Andy Burnham", and the row should say what the map says.
+  const memoryRef = useRef<TopicMemory | null>(null);
+  if (memoryRef.current === null) {
+    memoryRef.current = deserializeMemory(
+      typeof localStorage === "undefined" ? null : localStorage.getItem(MEMORY_KEY),
+      Date.now(),
+    );
+  }
+
+  const trends = useTrends(comments, corpus, memoryRef);
   const [filter, setFilter] = useState<string | null>(null);
   const toggleFilter = useCallback((word: string) => {
     setFilter((cur) => (cur && cur.toLowerCase() === word.toLowerCase() ? null : word));
@@ -819,17 +842,9 @@ function App() {
   const emoji = useMemo(() => topEmoji(comments, Date.now(), { limit: 5 }), [comments]);
   const [showRoom, setShowRoom] = useState(true);
 
-  // The association memory behind the constellation. Unlike a rolling window it
-  // is never rebuilt: each new comment reinforces the links it contains and
-  // everything decays with a half-life, so the map keeps learning what this
-  // audience connects. Persisted so a reload resumes rather than starts over.
-  const memoryRef = useRef<TopicMemory | null>(null);
-  if (memoryRef.current === null) {
-    memoryRef.current = deserializeMemory(
-      typeof localStorage === "undefined" ? null : localStorage.getItem(MEMORY_KEY),
-      Date.now(),
-    );
-  }
+  // Unlike a rolling window the memory is never rebuilt: each new comment
+  // reinforces the links it contains and everything decays with a half-life,
+  // so the map keeps learning. Persisted so a reload resumes, not restarts.
   const [graph, setGraph] = useState<TopicGraph>({ nodes: [], links: [] });
 
   useEffect(() => {
@@ -837,7 +852,11 @@ function App() {
     const mem = memoryRef.current;
     if (!mem) return;
     const now = Date.now();
-    reinforceMemory(mem, comments.map((c) => ({ ...c, id: c.uuid })), trends, now);
+    // The corpus lets consolidation join word-pairs the news cycle knows as one
+    // name ("andy" + "burnham"), so the map matches the merged trend row.
+    reinforceMemory(mem, comments.map((c) => ({ ...c, id: c.uuid })), trends, now, {
+      knownPhrases: corpus.current.phrases,
+    });
     // A phone-width canvas can't hold a desktop number of bodies legibly.
     const maxNodes = window.innerWidth < 560 ? 7 : window.innerWidth < 900 ? 11 : 14;
     setGraph(memoryToGraph(mem, { maxNodes, live: new Set(trends.map((t) => t.word.toLowerCase())) }));

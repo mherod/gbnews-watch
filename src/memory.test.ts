@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  canonicalizeTrends,
   decayMemory,
   deserializeMemory,
   edgeKey,
@@ -134,6 +135,61 @@ test("folds a bare word into the phrase that contains it", () => {
   expect(ids).not.toContain("illegal");
 });
 
+test("a Title-cased spelling displaces a SHOUTED one, but acronyms stand", () => {
+  const mem = emptyMemory(NOW);
+  // The room SHOUTS first; the label should still end up readable.
+  reinforceMemory(mem, [c("1", "BURNHAM out", "a")], [t("BURNHAM")], NOW);
+  expect(mem.nodes["burnham"]!.label).toBe("BURNHAM");
+  reinforceMemory(mem, [c("2", "Burnham again", "b")], [t("Burnham")], NOW);
+  expect(mem.nodes["burnham"]!.label).toBe("Burnham"); // Title case wins
+
+  // Short all-caps is a genuine acronym — "Uk" must not displace "UK".
+  reinforceMemory(mem, [c("3", "UK first", "a")], [t("UK")], NOW);
+  reinforceMemory(mem, [c("4", "Uk always", "b")], [t("Uk")], NOW);
+  expect(mem.nodes["uk"]!.label).toBe("UK");
+});
+
+test("joins two lone words the news cycle knows as one name", () => {
+  // "Andy" and "Burnham" trended at different times and never as the phrase,
+  // so subset containment can't touch them — only the corpus knows better.
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Andy at it again", "a"), c("2", "Andy always", "b")], [t("Andy")], NOW);
+  reinforceMemory(mem, [c("3", "Burnham speech", "x"), c("4", "Burnham nonsense", "y"), c("5", "Burnham again", "z")], [t("Burnham")], NOW);
+  expect(Object.keys(mem.nodes).sort()).toEqual(["andy", "burnham"]); // apart without the corpus
+
+  reinforceMemory(mem, [c("6", "nothing new", "q")], [t("Andy")], NOW, {
+    knownPhrases: new Set(["andy burnham"]),
+  });
+  const ids = Object.keys(mem.nodes).filter((id) => id.includes("andy") || id.includes("burnham"));
+  expect(ids).toEqual(["andy burnham"]); // one person on the map
+  const node = mem.nodes["andy burnham"]!;
+  expect(node.label).toBe("Andy Burnham");
+  expect([...node.authors].sort()).toEqual(["a", "b", "x", "y", "z"]); // every voice kept
+});
+
+test("does not pair words the corpus has no phrase for", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Labour today", "a")], [t("Labour")], NOW);
+  reinforceMemory(mem, [c("2", "migrants today", "b")], [t("migrants")], NOW, {
+    knownPhrases: new Set(["andy burnham"]), // unrelated phrase
+  });
+  expect(Object.keys(mem.nodes).sort()).toEqual(["labour", "migrants"]);
+});
+
+test("the paired node inherits the pair's edges and drops their mutual link", () => {
+  const mem = emptyMemory(NOW);
+  // One comment mentions Andy + Labour, another Burnham + Labour: after the
+  // pairing, both connections should belong to "andy burnham" — and the
+  // andy—burnham edge itself must dissolve rather than become a self-loop.
+  reinforceMemory(mem, [c("1", "Andy and Labour", "a")], [t("Andy"), t("Labour")], NOW);
+  reinforceMemory(mem, [c("2", "Burnham and Labour and Andy", "b")], [t("Burnham"), t("Labour"), t("Andy")], NOW, {
+    knownPhrases: new Set(["andy burnham"]),
+  });
+  const SEP = String.fromCharCode(31);
+  const keys = Object.keys(mem.edges).map((k) => k.split(SEP).sort().join("+"));
+  expect(keys).toEqual(["andy burnham+labour"]); // re-pointed, deduped, no self-loop
+});
+
 test("leaves genuinely different topics alone", () => {
   const mem = emptyMemory(NOW);
   const trends = [t("Labour"), t("migrants"), t("France")];
@@ -156,6 +212,41 @@ test("re-points edges onto the survivor and drops the self-link", () => {
   expect(keys).toHaveLength(1); // not one edge per spelling
   const [a, b] = keys[0]!.split(String.fromCharCode(31));
   expect([a, b].sort()).toEqual(["andy burnham", "labour"]);
+});
+
+test("canonicalizes a fresh short-form trend to the remembered identity", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Andy Burnham speech", "a"), c("2", "Andy Burnham again", "b")], [t("Andy Burnham")], NOW);
+
+  const fresh: Trend = { word: "Burnham", recent: 9, prior: 0, score: 30, authors: 5 };
+  const [out] = canonicalizeTrends(mem, [fresh]);
+  expect(out!.word).toBe("Andy Burnham"); // the row says what the map says
+  expect(out!.recent).toBe(9); // the live count is untouched
+  // The pattern still matches the short form, so highlighting and the
+  // memory's own reinforcement keep working on comments saying just "Burnham".
+  expect(new RegExp(`\\b(?:${out!.pattern})\\b`, "i").test("Burnham is at it")).toBe(true);
+});
+
+test("two fresh trends resolving to one person collapse into one chip", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Andy Burnham speech", "a"), c("2", "Andy Burnham twice", "b")], [t("Andy Burnham")], NOW);
+
+  const out = canonicalizeTrends(mem, [
+    { word: "Burnham", recent: 9, prior: 0, score: 30, authors: 5 },
+    { word: "Andy", recent: 4, prior: 0, score: 12, authors: 3 },
+    { word: "Labour", recent: 6, prior: 0, score: 20, authors: 4 },
+  ]);
+  expect(out.map((t2) => t2.word)).toEqual(["Andy Burnham", "Labour"]);
+  expect(out[0]!.recent).toBe(9); // strongest of the collapsed pair
+});
+
+test("canonicalization heals a shouted remembered label from live evidence", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Andy BURNHAM rant", "a"), c("2", "Andy BURNHAM more", "b")], [t("Andy BURNHAM")], NOW);
+  expect(mem.nodes["andy burnham"]!.label).toBe("Andy BURNHAM");
+
+  canonicalizeTrends(mem, [{ word: "Burnham", recent: 3, prior: 0, score: 10, authors: 2 }]);
+  expect(mem.nodes["andy burnham"]!.label).toBe("Andy Burnham"); // word healed
 });
 
 test("projects to a graph, marking topics not currently trending as faded", () => {

@@ -546,6 +546,20 @@ export function mergeStickyTrends(
   for (const t of fresh) if (!t.weak) sticky.set(t.word.toLowerCase(), { until: now + stickyMs, trend: t });
   for (const [key, entry] of sticky) if (entry.until <= now) sticky.delete(key);
 
+  // A merged topic replaces its fragments. When "Cambridge University" arrives,
+  // a lingering sticky "Cambridge" is the same topic's short form — showing
+  // both puts the merge and its leftovers side by side in the row. Any sticky
+  // entry whose every word is contained in a fresh trend's words is dropped.
+  for (const t of fresh) {
+    const full = new Set(t.word.toLowerCase().split(/\s+/).map(normalize));
+    if (full.size < 2) continue; // single words can't subsume anything
+    for (const key of [...sticky.keys()]) {
+      if (key === t.word.toLowerCase()) continue;
+      const parts = key.split(/\s+/).map(normalize);
+      if (parts.length < full.size && parts.every((w) => full.has(w))) sticky.delete(key);
+    }
+  }
+
   const freshKeys = new Set(fresh.map((t) => t.word.toLowerCase()));
   const faded = [...sticky.entries()]
     .filter(([key]) => !freshKeys.has(key))
