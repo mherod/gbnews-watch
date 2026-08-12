@@ -15,7 +15,7 @@ import { createRoot } from "react-dom/client";
 import type { ServerMessage, Stats, WireComment } from "../src/wire";
 import { computeTrends, mergeStickyTrends, termRegex, type StickyEntry, type Trend } from "../src/trending";
 import { roomMood, emojiSentiment, LEXICON, type Mood } from "../src/sentiment";
-import { topEmoji, type EmojiCount } from "../src/emoji";
+import { isEmoji, topEmoji, type EmojiCount } from "../src/emoji";
 
 const FEED_LIMIT = 150;
 /** Rolling window the activity sparkline covers. */
@@ -582,13 +582,23 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
         })}
       </div>
       {emoji.length > 0 && (
-        <div className="trends__emoji" title="Most-used emoji right now" aria-label="Top emoji">
-          {emoji.map((e) => (
-            <span key={e.emoji} className="emoji-chip">
-              <span className="emoji-chip__glyph">{e.emoji}</span>
-              <i>{e.count}</i>
-            </span>
-          ))}
+        <div className="trends__emoji" aria-label="Top emoji">
+          {emoji.map((e) => {
+            const active = filter === e.emoji;
+            return (
+              <button
+                key={e.emoji}
+                type="button"
+                className={`emoji-chip${active ? " emoji-chip--active" : ""}`}
+                aria-pressed={active}
+                title={active ? "Clear filter" : `Filter to comments using ${e.emoji}`}
+                onClick={() => onToggle(e.emoji)}
+              >
+                <span className="emoji-chip__glyph">{e.emoji}</span>
+                <i>{e.count}</i>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -675,7 +685,8 @@ function App() {
   const highlightTerms = useMemo<HlTerm[]>(() => {
     const map = new Map<string, HlTerm>();
     for (const t of trends) map.set(t.word.toLowerCase(), { word: t.word, pattern: t.pattern });
-    if (filter && !map.has(filter.toLowerCase())) map.set(filter.toLowerCase(), { word: filter });
+    // Word filters join the highlight set; an emoji filter doesn't (it's tinted already).
+    if (filter && !isEmoji(filter) && !map.has(filter.toLowerCase())) map.set(filter.toLowerCase(), { word: filter });
     return [...map.values()];
   }, [trends, filter]);
   const termsKey = highlightTerms.map((t) => t.pattern ?? t.word).join("|").toLowerCase();
@@ -736,6 +747,10 @@ function App() {
 
   const filtered = useMemo(() => {
     if (!filter) return views;
+    if (isEmoji(filter)) {
+      // Emoji don't sit on word boundaries — match the raw grapheme in the body.
+      return views.filter((v) => v.body.includes(filter));
+    }
     const re = termRegex(filter, filterPattern);
     return views.filter(
       (v) => re.test(v.body) || re.test(v.author) || (v.replyingTo ? re.test(v.replyingTo) : false),

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { topEmoji } from "./emoji";
+import { isEmoji, topEmoji } from "./emoji";
 
 const NOW = 1_000_000_000_000;
 const at = (body: string, ageMs = 10_000) => ({ body, postedAt: new Date(NOW - ageMs).toISOString() });
@@ -24,4 +24,13 @@ test("respects the time window", () => {
   const top = topEmoji([at("😂"), at("😂", 999_999)], NOW, { windowMs: 60_000 });
   // only one 😂 is within the window → below the floor of 2
   expect(top).toHaveLength(0);
+});
+
+test("isEmoji distinguishes emoji from words (routes the feed filter)", () => {
+  expect(isEmoji("😂")).toBe(true);
+  expect(isEmoji("🇬🇧")).toBe(true);
+  expect(isEmoji("🤬")).toBe(true);
+  expect(isEmoji("boats")).toBe(false);
+  expect(isEmoji("GB")).toBe(false);
+  expect(isEmoji("Reform UK")).toBe(false);
 });

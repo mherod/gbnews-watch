@@ -12,6 +12,12 @@ export interface EmojiCount {
 const PICTOGRAPHIC = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u;
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
+/** True when a string contains emoji — used to route the feed filter to an
+ *  emoji (substring) match rather than a whole-word regex. */
+export function isEmoji(s: string): boolean {
+  return PICTOGRAPHIC.test(s);
+}
+
 export function topEmoji(
   comments: readonly { body: string; postedAt: string }[],
   now: number,

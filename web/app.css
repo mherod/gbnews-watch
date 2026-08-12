@@ -283,6 +283,26 @@ body {
   align-items: center;
   gap: 4px;
   font-size: 15px;
+  padding: 2px 7px 2px 5px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.08s ease;
+}
+
+.emoji-chip:hover {
+  background: color-mix(in srgb, var(--ink-faint) 16%, transparent);
+}
+
+.emoji-chip:active {
+  transform: scale(0.94);
+}
+
+.emoji-chip--active {
+  background: var(--accent);
 }
 
 .emoji-chip__glyph {
@@ -295,6 +315,10 @@ body {
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   color: var(--ink-faint);
+}
+
+.emoji-chip--active i {
+  color: #fff;
 }
 
 @media (max-width: 560px) {
