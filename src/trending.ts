@@ -12,7 +12,7 @@ export const STOPWORDS = new Set(
     + "is are was were be been being am do does did doing have has had having "
     + "will would can could should shall may might must of to in on at by for with "
     + "from into over under out up down off about as so not no yes just like get got "
-    + "one two all any some more most much many very too also even still now then when "
+    + "one two all any some more most much many very too also even still now then when only "
     + "what who whom which why how where whose because while after before again once "
     + "he's she's it's i'm you're they're we're don't didn't doesn't isn't aren't wasn't "
     + "can't won't wouldn't couldn't shouldn't he'd she'd they'd i've you've we've "
@@ -296,11 +296,14 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
 
   const candidates: Trend[] = [];
   const consumed = new Set<string>();
+  const claimed = new Set<string>(); // phrase endpoints already spoken for
 
-  // Phrases first, boosted. A bare word is dropped when the phrase covers most of
-  // it; and a proper-noun phrase *absorbs and upgrades* a more-popular bare part
-  // — so "Stadlen" (20) and "Matthew Stadlen" (4) become one "Matthew Stadlen"
-  // topic carrying the bigger count, not two chips for the same person.
+  // Bigram phrases, boosted. A bare word is dropped when the phrase covers most
+  // of it; and a proper-noun phrase *absorbs and upgrades* a more-popular bare
+  // part — so "Stadlen" (20) and "Matthew Stadlen" (4) become one "Matthew
+  // Stadlen" topic carrying the bigger count, not two chips for the same person.
+  // Each bigram is a distinct phrase (kept), and claims its endpoints so the
+  // connective pass below can't re-fragment the same topic.
   for (const [key, s] of bi) {
     if (s.recent < 2) continue;
     const parts = key.split(" ");
@@ -319,29 +322,44 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       }
     }
     candidates.push({ word: bestForm(s.forms) ?? key, recent, prior: s.prior, score: sc, parts });
+    for (const w of parts) claimed.add(w);
   }
 
   // Connective phrases earn a slot only when ≥2 distinct people used the exact
   // bridged phrase AND both endpoints are themselves trending — so it surfaces
-  // "stop the boats" by uniting two hot topics rather than inventing a phrase
-  // nobody quite said. The endpoints are then folded in and the phrase carries
-  // the dominant count and a capitalisation-aware score — the same merge-and-
-  // upgrade behaviour as the proper-noun bigrams above.
+  // "stop the boats" by uniting two hot topics rather than inventing a phrase.
+  const connectives: Trend[] = [];
   for (const [key, s] of conn) {
     if (s.authors.size < 2) continue;
     const stems = key.split(" ");
     const head = uni.get(stems[0]!);
     const tail = uni.get(stems[stems.length - 1]!);
     if (!head || !tail || head.recent < 2 || tail.recent < 2) continue;
-    consumed.add(stems[0]!);
-    consumed.add(stems[stems.length - 1]!);
-    candidates.push({
+    connectives.push({
       word: bestForm(s.forms) ?? key,
       recent: Math.max(s.recent, head.recent, tail.recent),
       prior: s.prior,
       score: Math.max(score(s) * 1.8, score(head), score(tail)),
       parts: [stems[0]!, stems[stems.length - 1]!],
     });
+  }
+
+  // Collapse overlapping fragments of the *same repeated sentence*. When ~7
+  // people all post "Tucker Carlson is in bed with Dubai", the connectives
+  // "Carlson is in bed" and "bed with Dubai" pile up beside the "Tucker Carlson"
+  // bigram — three chips for one topic. Taking connectives strongest-first, we
+  // keep one only if neither endpoint is already claimed (by a bigram or a
+  // stronger connective), and always consume its endpoints so a bare
+  // "bed"/"Dubai" unigram can't leak through the gap either.
+  connectives.sort((a, b) => b.score - a.score);
+  for (const p of connectives) {
+    const parts = p.parts ?? [];
+    const overlaps = parts.some((w) => claimed.has(w));
+    for (const w of parts) {
+      claimed.add(w);
+      consumed.add(w);
+    }
+    if (!overlaps) candidates.push(p);
   }
 
   const singles: Trend[] = [];

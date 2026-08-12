@@ -169,6 +169,17 @@ test("strips a contraction so it becomes a stopword", () => {
   expect(trends.some((t) => t.word.toLowerCase().includes("there"))).toBe(false);
 });
 
+test("collapses overlapping fragments of one repeated sentence into a single topic", () => {
+  const trends = computeTrends(fromMany("Tucker Carlson is in bed with Dubai", 7), NOW, { limit: 8, minTrends: 1 });
+  const words = trends.map((t) => t.word);
+  expect(words).toContain("Tucker Carlson");
+  expect(words).not.toContain("Carlson is in bed"); // fragments of the same sentence
+  expect(words).not.toContain("bed with Dubai");
+  expect(words.some((w) => w.toLowerCase() === "bed")).toBe(false); // no bare fragment word
+  expect(words.some((w) => w.toLowerCase() === "dubai")).toBe(false);
+  expect(words.filter((w) => w.toLowerCase().includes("carlson"))).toHaveLength(1); // one chip
+});
+
 const trend = (word: string, score: number): Trend => ({ word, recent: 3, prior: 0, score });
 
 test("a topic lingers for the dwell time after it stops trending", () => {
