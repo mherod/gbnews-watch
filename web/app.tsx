@@ -701,8 +701,15 @@ function endTimeLabel(iso: string) {
 function OnAir({ programme }: { programme: WireProgramme | undefined }) {
   if (!programme) return null;
   const live = programme.type.toLowerCase() === "live";
+  const descId = "onair-desc";
   return (
-    <div className="onair" title={programme.description || undefined}>
+    <div
+      className="onair"
+      title={programme.description || undefined}
+      aria-live="polite"
+      aria-atomic="true"
+      aria-describedby={programme.description ? descId : undefined}
+    >
       <span className={`onair__type${live ? " onair__type--live" : ""}`}>
         {programme.type || "On air"}
       </span>
@@ -711,6 +718,11 @@ function OnAir({ programme }: { programme: WireProgramme | undefined }) {
         <span className="onair__with">with {presenterList.format(programme.presenters)}</span>
       )}
       <span className="onair__until">until {endTimeLabel(programme.end)}</span>
+      {programme.description && (
+        <span id={descId} className="onair__desc sr-only">
+          {programme.description}
+        </span>
+      )}
     </div>
   );
 }
