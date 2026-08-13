@@ -4,7 +4,7 @@
  * `computeTrends` on a short interval.
  */
 
-import { entityPattern, matchEntityAt } from "./entities";
+import { BOILERPLATE_STEMS, entityPattern, matchEntityAt } from "./entities";
 
 export const STOPWORDS = new Set(
   ("the a an and or but if then than that this these those they them their there here "
@@ -119,7 +119,8 @@ export function isCapitalized(word: string): boolean {
   return first !== undefined && first !== first.toLowerCase() && word !== word.toUpperCase();
 }
 
-const isContentWord = (stem: string) => stem.length >= 3 && !STOPWORDS.has(stem) && !/\d/.test(stem);
+export const isContentWord = (stem: string) =>
+  stem.length >= 3 && !STOPWORDS.has(stem) && !BOILERPLATE_STEMS.has(stem) && !/\d/.test(stem);
 const bestForm = (forms: Map<string, number>) =>
   [...forms].sort((a, b) => b[1] - a[1])[0]?.[0];
 
@@ -216,6 +217,19 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   const conn = new Map<string, Stat>(); // two topics bridged by short stopword glue
   const ent = new Map<string, Stat>(); // curated known entities (NHS, Tory→Conservative)
 
+  interface ParsedComment {
+    isRecent: boolean;
+    author: string;
+    weight: number;
+    cleanBody: string;
+    matches: RegExpExecArray[];
+    tokens: string[];
+  }
+
+  const parsed: ParsedComment[] = [];
+  let recentCommentCount = 0;
+  const docCounts = new Map<string, number>();
+
   for (const c of comments) {
     const age = now - new Date(c.postedAt).getTime();
     if (age < 0 || age > priorMs) continue;
@@ -226,7 +240,26 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     const cleanBody = stripNonProse(c.body);
     const matches = [...cleanBody.matchAll(TOKEN)];
     const tokens = matches.map((m) => m[0]);
+    if (isRecent) {
+      recentCommentCount += 1;
+      const seen = new Set(tokens.map(normalize).filter(isContentWord));
+      for (const stem of seen) {
+        docCounts.set(stem, (docCounts.get(stem) ?? 0) + 1);
+      }
+    }
+    parsed.push({ isRecent, author, weight, cleanBody, matches, tokens });
+  }
 
+  const isBoilerplate = (stem: string): boolean => {
+    if (BOILERPLATE_STEMS.has(stem)) return true;
+    if (corpus?.stems.has(stem)) return false;
+    if (recentCommentCount >= 15 && (docCounts.get(stem) ?? 0) / recentCommentCount > 0.35) {
+      return true;
+    }
+    return false;
+  };
+
+  for (const { isRecent, author, weight, cleanBody, matches, tokens } of parsed) {
     // Known-entity pass first: greedily match curated aliases (longest wins),
     // canonicalise ("Tory" → "Conservative"), and mark the consumed token spans
     // so the generic passes below skip them. Entities count as strong topics
@@ -251,7 +284,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     for (let mi = 0; mi < matches.length; mi++) {
       if (entIdx.has(mi)) continue; // already claimed by an entity
       const stem = normalize(tokens[mi]!);
-      if (!isContentWord(stem)) continue;
+      if (!isContentWord(stem) || isBoilerplate(stem)) continue;
       const cap = isCapitalized(tokens[mi]!);
       const prev = seenUni.get(stem);
       if (!prev) seenUni.set(stem, { display: tokens[mi]!, cap });
@@ -270,7 +303,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       if (!/^\s+$/.test(gap)) continue;
       const a = normalize(cur[0]);
       const b = normalize(next[0]);
-      if (!isContentWord(a) || !isContentWord(b)) continue;
+      if (!isContentWord(a) || !isContentWord(b) || isBoilerplate(a) || isBoilerplate(b)) continue;
       const key = `${a} ${b}`;
       if (seenBi.has(key)) continue;
       seenBi.add(key);
@@ -300,7 +333,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       const a = normalize(t0[0]);
       const b = normalize(t1[0]);
       const d = normalize(t2[0]);
-      if (!isContentWord(a) || !isContentWord(b) || !isContentWord(d)) continue;
+      if (!isContentWord(a) || !isContentWord(b) || !isContentWord(d) || isBoilerplate(a) || isBoilerplate(b) || isBoilerplate(d)) continue;
       const key = `${a} ${b} ${d}`;
       if (seenTri.has(key)) continue;
       seenTri.add(key);
@@ -317,7 +350,8 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     for (let i = 0; i + 2 < matches.length; i++) {
       if (entIdx.has(i)) continue; // an entity isn't a bare connective endpoint
       const first = matches[i]!;
-      if (!isContentWord(normalize(first[0]))) continue;
+      const head = normalize(first[0]);
+      if (!isContentWord(head) || isBoilerplate(head)) continue;
       let bridges = 0;
       for (let j = i + 1; j < matches.length && bridges <= 2; j++) {
         if (entIdx.has(j)) break; // stop at an entity token
@@ -330,7 +364,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
           bridges += 1; // a bit of glue ("the", "our", "all")
           continue;
         }
-        if (!isContentWord(stem)) break;
+        if (!isContentWord(stem) || isBoilerplate(stem)) break;
         if (bridges >= 1) {
           const stems: string[] = [];
           const forms: string[] = [];
@@ -531,7 +565,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   }
 
   for (const [key, s] of uni) {
-    if (consumed.has(key)) continue;
+    if (consumed.has(key) || isBoilerplate(key)) continue;
     (s.recent >= 2 ? candidates : singles).push(toTrend(key, s, 1));
   }
 

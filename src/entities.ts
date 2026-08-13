@@ -39,6 +39,13 @@ export interface Entity {
 /** Convenience: an alias that only counts when Capitalised. */
 const caps = (text: string): EntityAlias => ({ text, requireCaps: true });
 
+export const BOILERPLATE_STEMS = new Set([
+  "gbnews",
+  "gbn",
+  "gbfamily",
+  "livestream",
+]);
+
 export const ENTITIES: Entity[] = [
   // ---- Institutions, bodies & abbreviations ----
   // All-caps forms match case-insensitively (commenters SHOUT and whisper both),
@@ -46,6 +53,8 @@ export const ENTITIES: Entity[] = [
   { canonical: "NHS", category: "institution", aliases: [{ text: "nhs" }] },
   { canonical: "EU", category: "institution", aliases: [{ text: "eu" }, { text: "european union" }] },
   { canonical: "UK", category: "institution", aliases: [{ text: "uk" }, { text: "united kingdom" }, caps("britain")] },
+  { canonical: "GB News", category: "institution", aliases: [{ text: "gb news" }, { text: "gbnews" }] },
+  { canonical: "The Sun", category: "institution", aliases: [{ text: "the sun" }] },
   { canonical: "GB", category: "institution", aliases: [{ text: "gb" }] }, // note: often GB News itself
   { canonical: "USA", category: "institution", aliases: [{ text: "usa" }, { text: "united states" }, caps("america")] },
   { canonical: "UN", category: "institution", aliases: [caps("un"), { text: "united nations" }] }, // caps: avoid "wrong'un"

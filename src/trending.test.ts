@@ -453,3 +453,49 @@ test("stripping a URL breaks bigram and connective bridging across the stripped 
   expect(words).not.toContain("disposable bbq");
 });
 
+test("GB News and The Sun are matched as entities, consuming bare News and Sun unigrams", () => {
+  const comments = [
+    c("watching GB News today", { author: "a" }),
+    c("saw this on GB News", { author: "b" }),
+    c("reported in The Sun newspaper", { author: "c" }),
+    c("read The Sun yesterday", { author: "d" }),
+  ];
+  const trends = computeTrends(comments, NOW, { minTrends: 1 });
+  const words = trends.map((t) => t.word);
+  expect(words).toContain("GB News");
+  expect(words).toContain("The Sun");
+  expect(words.map((w) => w.toLowerCase())).not.toContain("news");
+  expect(words.map((w) => w.toLowerCase())).not.toContain("sun");
+});
+
+test("curated boilerplate tokens (e.g. gbnews, gbfamily) are not extracted as unigram topics", () => {
+  const comments = [
+    c("hello gbnews viewers", { author: "a" }),
+    c("great gbnews broadcast", { author: "b" }),
+    c("welcome gbfamily", { author: "c" }),
+  ];
+  const trends = computeTrends(comments, NOW, { minTrends: 0 });
+  const words = trends.map((t) => t.word.toLowerCase());
+  expect(words).not.toContain("gbnews");
+  expect(words).not.toContain("gbfamily");
+});
+
+test("stems appearing in an implausibly high fraction of comments are suppressed as boilerplate", () => {
+  // 16 distinct comments: 10 contain "stream" (not in corpus) -> DF > 35% -> suppressed
+  // 4 contain "taxes" -> DF = 25% <= 35% -> extracted
+  const comments: TrendInput[] = [];
+  for (let i = 0; i < 16; i++) {
+    const text = i < 10
+      ? `great stream tonight ${i}`
+      : i < 14
+      ? `arguing about taxes and rates ${i}`
+      : `weather is nice today ${i}`;
+    comments.push(c(text, { author: `u${i}` }));
+  }
+  const trends = computeTrends(comments, NOW, { minTrends: 1 });
+  const words = trends.map((t) => t.word.toLowerCase());
+  expect(words.some((w) => w.includes("taxes"))).toBe(true);
+  expect(words.some((w) => w.includes("stream"))).toBe(false);
+});
+
+
