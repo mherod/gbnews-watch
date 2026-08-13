@@ -336,3 +336,26 @@ test("only a handful of programmes are remembered per topic", () => {
   expect(Object.keys(buckets).length).toBeLessThanOrEqual(6);
   expect(buckets["Show 8"]).toBe(1); // the freshest attribution is never the one dropped
 });
+
+test("a fold never carries more programme attributions than the cap", () => {
+  const mem = emptyMemory(NOW);
+  // Two lone words the corpus knows as one name. Neither's tokens contain the
+  // other's, so subset consolidation never touches them — each accumulates its
+  // own broadcasts until the pairing sweep joins them in one step.
+  for (let i = 0; i < 5; i++) {
+    reinforceMemory(mem, [c(`a${i}`, "andy", `ua${i}`)], [t("andy")], NOW, { onAir: `A ${i}` });
+    reinforceMemory(mem, [c(`b${i}`, "burnham", `ub${i}`)], [t("burnham")], NOW, { onAir: `B ${i}` });
+  }
+  // One show is argued under twice — the strongest attribution on either side.
+  reinforceMemory(mem, [c("x", "andy again", "ux")], [t("andy")], NOW, { onAir: "A 0" });
+  expect(Object.keys(mem.nodes["andy"]!.onAir!)).toHaveLength(5);
+  expect(Object.keys(mem.nodes["burnham"]!.onAir!)).toHaveLength(5);
+
+  // The pairing fold unions both sides' buckets: ten candidates, six slots.
+  reinforceMemory(mem, [c("p", "boats", "up")], [t("boats")], NOW, {
+    knownPhrases: new Set(["andy burnham"]),
+  });
+  const buckets = mem.nodes["andy burnham"]!.onAir!;
+  expect(Object.keys(buckets).length).toBeLessThanOrEqual(6);
+  expect(buckets["A 0"]).toBe(2); // the strongest survives the trim
+});

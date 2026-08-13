@@ -253,22 +253,32 @@ function prettyLabel(label: string): string {
   return label.replace(/['']s$/, "");
 }
 
+/**
+ * Drops the faintest attributions once a topic holds more than the cap — a
+ * topic that outlives more broadcasts has stopped being about any of them.
+ * The sort is stable, so among equals the earliest-learned goes first and a
+ * freshly-bumped or freshly-merged title is never the casualty.
+ */
+function trimOnAir(buckets: Record<string, number>): void {
+  const titles = Object.keys(buckets);
+  if (titles.length <= MAX_PROGRAMMES) return;
+  titles.sort((a, b) => buckets[a]! - buckets[b]!);
+  for (const t of titles.slice(0, titles.length - MAX_PROGRAMMES)) delete buckets[t];
+}
+
 /** One more comment argued this topic under the given broadcast. */
 function bumpOnAir(node: MemoryNode, title: string): void {
   const buckets = (node.onAir ??= {});
   buckets[title] = (buckets[title] ?? 0) + 1;
-  const titles = Object.keys(buckets);
-  if (titles.length > MAX_PROGRAMMES) {
-    // The faintest attribution goes — never the one just reinforced.
-    titles.sort((a, b) => buckets[a]! - buckets[b]!);
-    for (const t of titles.slice(0, titles.length - MAX_PROGRAMMES)) delete buckets[t];
-  }
+  trimOnAir(buckets);
 }
 
 /**
  * Carries programme attribution across a node merge. Max per title, not sum,
  * for the same reason weight merges as max: the variants counted the same
- * comments, so adding their buckets would double the evidence.
+ * comments, so adding their buckets would double the evidence. Trimmed after
+ * the union: two capped variants can offer up to twice the cap between them,
+ * and the fold must not smuggle the invariant past bumpOnAir's gate.
  */
 function mergeOnAir(dst: MemoryNode, src: MemoryNode): void {
   if (!src.onAir) return;
@@ -276,6 +286,7 @@ function mergeOnAir(dst: MemoryNode, src: MemoryNode): void {
   for (const [title, w] of Object.entries(src.onAir)) {
     buckets[title] = Math.max(buckets[title] ?? 0, w);
   }
+  trimOnAir(buckets);
 }
 
 /**
