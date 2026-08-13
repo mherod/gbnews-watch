@@ -3,10 +3,23 @@
 Streams GB News "Have Your Say" comments as they are posted — to a web UI, or to
 your terminal.
 
+To be clear about proportion: this repo holds a realtime push subscription with
+a REST safety net, a hand-vetted entity lexicon, sentiment analysis tuned to
+its audience, a two-layer schedule cache, and an exponentially-decaying topic
+memory that survives serverless cold starts — so that when someone types
+"Spot on molly 👌" under the breakfast programme, it reaches your screen about
+400 milliseconds later. Every engineering decision here was made in earnest.
+The subject matter declined to reciprocate.
+
 ```bash
 bun install
-bun run start      # http://localhost:3000
+bun run dev        # http://localhost:3000
 ```
+
+`bun run dev` is the whole local setup — Bun bundles the React frontend on the
+fly and hot-reloads it. The production shape is `bun run build && bun run
+start`, which inlines the built frontend first; `start` without a build serves
+the API and websocket only, and says so on boot.
 
 A single Bun process holds one upstream subscription and fans it out to every
 open tab. Comments appear newest-first, typically under half a second after
@@ -18,8 +31,52 @@ someone hits send.
 | `/ws` | websocket — a snapshot on connect, then one message per comment |
 | `/api/health` | buffered count, comments/min, upstream state, connected tabs |
 | `/api/schedule` | the broadcast grid, plus the programme on air right now |
+| `/api/room` | the shared topic memory — every visitor renders this same graph |
+| `/api/corpus` | news-cycle vocabulary from the site's RSS, used only to weight topic detection |
 
-Set `PORT` to serve somewhere else.
+## The feed
+
+What the browser shows, top to bottom:
+
+- **The Room** — a live force-directed map of what the comments are arguing
+  about, drawn to canvas. Each topic is a body of mass: bigger the more it has
+  been dominating lately, redder as the comments mentioning it turn angry,
+  greener as they warm up — and tethered to another topic when the two are
+  argued in the same breath. Which grievances travel as a pair is the shape
+  worth watching. Click a body to filter the feed to it.
+- **Trend chips** — words and phrases surging in the stream, rising/falling
+  arrows included. Click one to filter; the **Conservative** chip also catches
+  "Tory". When nothing has caught on with more than one person, the row admits
+  "· quiet" rather than inventing news.
+- **The mood** — a rough temperature taken from words and emoji: *heated*,
+  *grumbly*, *mixed*, *warm* or *buzzing*, with the split shown when the room
+  genuinely disagrees ("60% 🔥 · 40% 🙂").
+- **Top emoji** — the last five minutes' emoji leaderboard, one-offs ignored.
+  Click one to filter to the comments carrying it.
+- **On air now** — the current programme from the scraped schedule, so a surge
+  can be attributed to whoever provoked it.
+- **The feed itself** — newest-first under a 90-second activity sparkline,
+  with a rate meter that counts when comments were *posted* rather than when
+  they arrived (a replayed backfill must not read as a 40-comment rush),
+  replies quoting the comment they answer, and frequent posters flagged once
+  they manage three comments in five minutes.
+
+## Configuration
+
+Nothing is required — with an empty environment the server runs memory-only and
+the feed works fully. Persistence is an environment decision, not a code one:
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `PORT` | `3000` | Where the server listens. |
+| `KV_REST_API_URL` + `KV_REST_API_TOKEN` | — | Room memory and schedule snapshots go to Upstash over REST — preferred on serverless, where a stateless request can't go stale between invocations. Vercel's Upstash integration sets both. |
+| `REDIS_URL` (or `KV_URL`) | — | The same snapshots over Redis TCP, `rediss://` TLS included. |
+| `ROOM_MEMORY_FILE` | `.room-memory.json` (dev) | Path for the room memory's file store, and permission to use the file backend outside dev. Upstash/Redis still win when configured. |
+
+The first match wins: Upstash REST → Redis → a JSON file (dev, where the
+filesystem outlives the process) → none. Losing the store costs continuity,
+not correctness — the room memory becomes warm-lifetime only, and each cold
+start re-scrapes the schedule.
 
 ## Terminal
 
@@ -62,8 +119,10 @@ bun run cli --json | jq -r '"\(.author): \(.body)"'
 vercel deploy
 ```
 
-`vercel.json` is all the configuration needed — no environment variables, since
-the Viafoura read APIs are public.
+`vercel.json` is all the configuration needed — no environment variables are
+required, since the Viafoura read APIs are public. The one integration worth
+attaching is Upstash (or set `REDIS_URL`): it is what lets the room memory and
+the schedule snapshot survive cold starts.
 
 ```json
 {
@@ -95,8 +154,10 @@ Three things also behave differently at runtime in production:
 
 - **One subscription per instance, not per deployment.** Locally a single
   process holds one upstream socket for every tab. Vercel scales instances
-  independently, so each one opens its own Viafoura subscription and runs its
-  own backfill. Fine at this size, but it isn't the shared-upstream model.
+  independently, so each one opens its own Viafoura subscription, runs its own
+  backfill, and learns its own room memory — instances trade last-writer-wins
+  snapshots through the shared store. Fine at this size, but nobody would call
+  it consensus.
 - **Connections end when the function does.** `maxDuration` caps a websocket's
   life, so clients will periodically reconnect. The frontend already backs off
   exponentially, which is what Vercel's own websocket guidance recommends.
@@ -114,11 +175,22 @@ behind a reverse proxy is the whole deployment.
 | --- | --- |
 | `src/viafoura.ts` | REST client — comments, replies, user lookups, container resolution |
 | `src/realtime.ts` | the websocket subscription and its reconnect loop |
-| `src/schedule.ts` | the broadcast schedule, scraped from the `/watch/schedule` page |
 | `src/stream.ts` | merges both sources into one de-duplicated stream |
-| `src/app-server.ts` | serves the UI and fans the stream out to browser tabs |
-| `web/` | the React frontend, bundled by Bun's HTML import |
-| `index.ts` | the server — also Vercel's detected entrypoint |
+| `src/schedule.ts` | the broadcast schedule, scraped from the `/watch/schedule` page |
+| `src/trending.ts` | words and phrases surging against their own prior |
+| `src/entities.ts` | curated entity aliases — "Tory"/"Tories" → **Conservative** |
+| `src/sentiment.ts` | the room's temperature, AFINN-style, tuned to this audience |
+| `src/emoji.ts` | grapheme-aware emoji counting — 🇬🇧 is one emoji, not two |
+| `src/corpus.ts` | news-cycle vocabulary from the site's RSS feed |
+| `src/graph.ts` | the amnesiac co-mention graph of the last few minutes |
+| `src/memory.ts` | the long-lived one — reinforcement, decay, broadcast attribution |
+| `src/room-store.ts` | where the memory sleeps: Upstash REST, Redis, or a file |
+| `src/wire.ts` | the websocket message types both ends agree on |
+| `src/app-server.ts` | serves the UI, fans the stream out, runs the learning tick |
+| `web/` | the React frontend; `constellation.tsx` draws The Room |
+| `server.ts` | production entrypoint — what Vercel detects and runs |
+| `dev.ts` | dev entrypoint — Bun HTML import, HMR |
+| `bundle-frontend.ts` | inlines the built frontend for serverless (`bun run build`) |
 | `cli.ts` | the terminal client |
 
 `app-server.ts` takes its stream as an argument rather than creating one, so
@@ -169,6 +241,58 @@ loses nothing.
 Measured on the live feed: socket median **398 ms** behind the posted timestamp,
 3-second polling median **2,557 ms**.
 
+### Topic detection
+
+The trend chips and The Room share one pipeline of pure functions:
+
+- **`trending.ts`** scores words and two-word phrases by how hard they surge
+  against their own prior, and requires breadth across distinct authors — one
+  person cannot manufacture a trend, however hard they post. Engagement counts
+  too: a liked, replied-to comment lifts the words it uses.
+- **`entities.ts`** merges aliases into one canonical topic and carries the
+  disambiguation this particular corpus demands: `UN` only counts when
+  capitalised, because the audience writes "wrong'un" considerably more often
+  than it discusses the United Nations. Likewise `VAT` (the tax, not the
+  container) and the Home Office (the department, not the spare room).
+- **`corpus.ts`** reads the site's own RSS headlines for the live news-cycle
+  vocabulary, so a name can be recognised before the chat has repeated it
+  enough to trend on its own. It only ever weights detection — nothing from
+  the feed is rendered.
+- **`sentiment.ts`** is an AFINN-style lexicon deliberately weighted toward
+  the vocabulary these commenters actually use — "marvellous" scores +3,
+  "spineless" −2 — and reads emoji as first-class signals (💩 is −3, which
+  feels right).
+
+The stopword list keeps a dedicated section for the debris left when a
+non-standard apostrophe splits a contraction — `doesn`, `didn`, `wouldn` —
+which is as close as this repo comes to a style guide for its input.
+
+### The Room's memory
+
+The map is not a per-tab visualisation. It is one shared memory, learned
+server-side on an 8-second tick from every comment the server sees, whether or
+not anyone has a tab open — it used to live in each browser's localStorage,
+which meant it only learned while someone watched and every visitor saw a
+private graph. Now `/api/room` serves the same map to everyone.
+
+Topics are reinforced each time they appear and decay exponentially with a
+45-minute half-life: a link seen once an hour survives, a link seen once ever
+fades out, and a link hammered all evening becomes structural. Node size
+follows accumulated, decayed weight — how much the topic has been dominating —
+with distinct voices as a floor. Voices are counted as distinct commenter ids,
+capped at sixteen, because a running total would credit the same commenter on
+every batch and turn one obsessive into a crowd.
+
+Each topic also accumulates which programmes it was argued under, attributed at
+learning time against whatever the schedule says is on air, decayed like
+everything else, and capped at six programmes — a topic that outlives six
+programmes has stopped being *about* any of them.
+
+With a store configured (see Configuration) the memory survives process death:
+hydrated once at boot, snapshotted after every tick. The snapshot keeps the
+seen-comment list, so a backfill replayed after a restart is not counted twice,
+and the decay clock, so downtime ages the graph exactly as elapsed time should.
+
 ### The broadcast schedule
 
 There is no public schedule JSON endpoint. The `/watch/schedule` page ships the
@@ -216,6 +340,9 @@ is hardcoded in `src/viafoura.ts`.
 bun test
 ```
 
+The analysis pipeline is pure functions end to end, so the suite runs in about
+a second and none of it needs GB News to be on air.
+
 ## Diagnostic scripts
 
 Kept around so the next investigation starts from evidence rather than guesswork:
@@ -241,3 +368,19 @@ bun scripts/debug-empty-state.ts
 
 Serves the real UI against a source that never emits, so the waiting state can
 be inspected without waiting for GB News to go quiet.
+
+```bash
+bun scripts/debug-merge-overlap.ts
+```
+
+Replays the live case where "bbq's" and "disposable BBQ" trended as two
+separate chips, printing the stems and capitalisation flags the merge rule
+reads and the chips that result.
+
+```bash
+bun scripts/debug-upstash-roundtrip.ts
+```
+
+Proves the Upstash REST wiring against the real service without touching the
+live room key: save → load → compare on a scratch key, then delete it. Nothing
+secret is printed.
