@@ -418,9 +418,11 @@ export function Constellation({ graph, filter, onToggle }: {
           const max = canvasWidthChars(w);
           const title = during.title.length > max ? `${during.title.slice(0, max - 1).trimEnd()}…` : during.title;
           const line = `during ${title} · ${Math.round(during.share * 100)}%`;
-          ctx.strokeText(line, n.px, vy + 13);
+          // Flip above the node when drawing below would clip against the canvas floor.
+          const cy = vy + 18 > h ? Math.max(12, n.py - r - 12) : vy + 13;
+          ctx.strokeText(line, n.px, cy);
           ctx.fillStyle = ink;
-          ctx.fillText(line, n.px, vy + 13);
+          ctx.fillText(line, n.px, cy);
         }
         ctx.globalAlpha = 1;
       }
