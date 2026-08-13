@@ -260,6 +260,32 @@ function useCommentFeed(): FeedState {
   return { comments, stats, connected, arrivals, peakPerMinute };
 }
 
+/**
+ * Whether the sticky masthead should yield viewport back to the feed. Two
+ * thresholds (condense past 90, expand above 40) so the boundary can't
+ * flicker; rAF-throttled passive listener so scrolling stays cheap.
+ */
+function useCondensedMasthead() {
+  const [condensed, setCondensed] = useState(false);
+  useEffect(() => {
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        setCondensed((c) => (c ? window.scrollY > 40 : window.scrollY > 90));
+      });
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
+  return condensed;
+}
+
 /** Shared 1s clock so relative times stay fresh without per-comment timers. */
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(() => Date.now());
@@ -724,28 +750,19 @@ function endTimeLabel(iso: string) {
 function OnAir({ programme }: { programme: WireProgramme | undefined }) {
   if (!programme) return null;
   const live = programme.type.toLowerCase() === "live";
-  const descId = "onair-desc";
   return (
-    <div
-      className="onair"
-      title={programme.description || undefined}
-      aria-live="polite"
-      aria-atomic="true"
-      aria-describedby={programme.description ? descId : undefined}
-    >
-      <span className={`onair__type${live ? " onair__type--live" : ""}`}>
-        {programme.type || "On air"}
-      </span>
-      <b className="onair__title">{programme.title}</b>
-      {programme.presenters.length > 0 && (
-        <span className="onair__with">with {presenterList.format(programme.presenters)}</span>
-      )}
-      <span className="onair__until">until {endTimeLabel(programme.end)}</span>
-      {programme.description && (
-        <span id={descId} className="onair__desc sr-only">
-          {programme.description}
+    <div className="onair" aria-live="polite" aria-atomic="true">
+      <div className="onair__head">
+        <span className={`onair__type${live ? " onair__type--live" : ""}`}>
+          {programme.type || "On air"}
         </span>
-      )}
+        <b className="onair__title">{programme.title}</b>
+        {programme.presenters.length > 0 && (
+          <span className="onair__with">with {presenterList.format(programme.presenters)}</span>
+        )}
+        <span className="onair__until">until {endTimeLabel(programme.end)}</span>
+      </div>
+      {programme.description && <p className="onair__desc">{programme.description}</p>}
     </div>
   );
 }
@@ -927,9 +944,10 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
       ? "status"
       : "status status--down";
   const statusText = !connected ? "Disconnected" : stats.upstream === "live" ? "Live" : "Connecting";
+  const condensed = useCondensedMasthead();
 
   return (
-    <header className="masthead">
+    <header className={`masthead${condensed ? " masthead--condensed" : ""}`}>
       <div className="masthead__row">
         <div className="masthead__title">
           <h1>
@@ -1252,6 +1270,14 @@ function App() {
                 <p>
                   No dispatches mention “{filter}” in the recent debate. It may crop up as the room gets going.
                 </p>
+                <button
+                  type="button"
+                  className="feed__clear"
+                  title="Clear the filter and return to every dispatch"
+                  onClick={() => setFilter(null)}
+                >
+                  Back to all dispatches
+                </button>
               </div>
             ) : (
               <ul className="feed">
