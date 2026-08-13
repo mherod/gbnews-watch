@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   computeTrends,
   mergeStickyTrends,
+  stripNonProse,
   termRegex,
   type StickyEntry,
   type Trend,
@@ -412,3 +413,43 @@ test("a lowercase ambiguous alias does not conjure an entity", () => {
   const trends = computeTrends(fromMany("we need reform of the system", 3), NOW, { minTrends: 1 });
   expect(trends.some((t) => t.word === "Reform UK")).toBe(false); // lowercase 'reform' is the verb
 });
+
+test("stripNonProse strips URLs, bare domains, emails, handles, and HTML markup", () => {
+  expect(stripNonProse("check out https://example.com/page?v=123 now")).toBe("check out  .  now");
+  expect(stripNonProse("visit www.gbnews.com for live coverage")).toBe("visit  .  for live coverage");
+  expect(stripNonProse("email info@gbnews.uk or contact @reporter")).toBe("email  .  or contact  . ");
+  expect(stripNonProse("<b>bold topic</b> and plain words")).toBe(" . bold topic .  and plain words");
+});
+
+test("a comment whose body is only a URL contributes no topics", () => {
+  const trends = computeTrends(
+    fromMany("youtube.com/watch?v=nVHNQpmUodw", 5),
+    NOW,
+    { minTrends: 0 },
+  );
+  expect(trends).toEqual([]);
+});
+
+test("prose in a comment that also contains a link is extracted normally without URL fragments", () => {
+  const comments = [
+    c("look at these taxes youtube.com/watch?v=nVHNQpmUodw completely unfair", { author: "a" }),
+    c("taxes are absurd https://youtu.be/nVHNQpmUodw check this", { author: "b" }),
+    c("cutting taxes is vital www.example.com/taxes-article", { author: "c" }),
+  ];
+  const trends = computeTrends(comments, NOW, { minTrends: 1 });
+  const words = trends.map((t) => t.word.toLowerCase());
+  expect(words).toContain("taxes");
+  expect(words).not.toContain("youtube");
+  expect(words).not.toContain("watch");
+  expect(words).not.toContain("com");
+  expect(words).not.toContain("nvhnqpmuodw");
+});
+
+test("stripping a URL breaks bigram and connective bridging across the stripped span", () => {
+  // "disposable" and "BBQ" separated by a URL must NOT bridge into the bigram "disposable BBQ"
+  const comments = fromMany("disposable https://example.com/link BBQ", 3);
+  const trends = computeTrends(comments, NOW, { minTrends: 1 });
+  const words = trends.map((t) => t.word.toLowerCase());
+  expect(words).not.toContain("disposable bbq");
+});
+

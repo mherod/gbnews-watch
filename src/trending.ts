@@ -70,6 +70,35 @@ export function termRegex(term: string, pattern?: string): RegExp {
 
 const TOKEN = /[\p{L}][\p{L}\p{N}'']*/gu;
 
+const URL_OR_NON_PROSE: RegExp[] = [
+  // Full http/https URLs with query params/fragments
+  /https?:\/\/\S+/gi,
+  // www. links
+  /\bwww\.\S+/gi,
+  // Common bare domain links (e.g. youtube.com/watch?v=..., youtu.be/...)
+  /\b[a-zA-Z0-9-]+\.(?:com|org|net|co\.uk|gov\.uk|io|tv|me|be|app|info|news|edu|co)(?:\/\S*)?\b/gi,
+  // Email addresses
+  /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi,
+  // User mentions (@handle)
+  /@[\w-]+/g,
+  // HTML tags
+  /<[^>]+>/g,
+];
+
+/**
+ * Strips URLs, domain links, email addresses, and @handles from comment text,
+ * replacing each with a punctuation break (" . "). This prevents URL fragments
+ * (e.g. youtube, com, watch, opaque video IDs) from decomposing into tokens and
+ * dominating the topic map, while also breaking any accidental bigram/phrase bridging.
+ */
+export function stripNonProse(body: string): string {
+  let text = body;
+  for (const re of URL_OR_NON_PROSE) {
+    text = text.replace(re, " . ");
+  }
+  return text;
+}
+
 /**
  * Light stemmer: lowercases, drops a possessive/contraction "'s", and folds
  * common plurals so "toilet"/"toilets" and "party"/"parties" count as one. Not
@@ -90,7 +119,7 @@ export function isCapitalized(word: string): boolean {
   return first !== undefined && first !== first.toLowerCase() && word !== word.toUpperCase();
 }
 
-const isContentWord = (stem: string) => stem.length >= 3 && !STOPWORDS.has(stem);
+const isContentWord = (stem: string) => stem.length >= 3 && !STOPWORDS.has(stem) && !/\d/.test(stem);
 const bestForm = (forms: Map<string, number>) =>
   [...forms].sort((a, b) => b[1] - a[1])[0]?.[0];
 
@@ -194,7 +223,8 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     const author = c.author ?? "";
     // Diminishing engagement weight so a viral comment can't fully dominate.
     const weight = Math.min(6, (c.likes ?? 0) * 0.25 + (c.replies ?? 0) * 0.5);
-    const matches = [...c.body.matchAll(TOKEN)];
+    const cleanBody = stripNonProse(c.body);
+    const matches = [...cleanBody.matchAll(TOKEN)];
     const tokens = matches.map((m) => m[0]);
 
     // Known-entity pass first: greedily match curated aliases (longest wins),
@@ -236,7 +266,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       if (entIdx.has(i) || entIdx.has(i + 1)) continue; // don't bridge into an entity
       const cur = matches[i]!;
       const next = matches[i + 1]!;
-      const gap = c.body.slice(cur.index! + cur[0].length, next.index!);
+      const gap = cleanBody.slice(cur.index! + cur[0].length, next.index!);
       if (!/^\s+$/.test(gap)) continue;
       const a = normalize(cur[0]);
       const b = normalize(next[0]);
@@ -263,8 +293,8 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       const t0 = matches[i]!;
       const t1 = matches[i + 1]!;
       const t2 = matches[i + 2]!;
-      const g1 = c.body.slice(t0.index! + t0[0].length, t1.index!);
-      const g2 = c.body.slice(t1.index! + t1[0].length, t2.index!);
+      const g1 = cleanBody.slice(t0.index! + t0[0].length, t1.index!);
+      const g2 = cleanBody.slice(t1.index! + t1[0].length, t2.index!);
       if (!/^\s+$/.test(g1) || !/^\s+$/.test(g2)) continue;
       if (!isCapitalized(t0[0]) || !isCapitalized(t1[0]) || !isCapitalized(t2[0])) continue;
       const a = normalize(t0[0]);
@@ -293,7 +323,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
         if (entIdx.has(j)) break; // stop at an entity token
         const prev = matches[j - 1]!;
         const cur = matches[j]!;
-        const gap = c.body.slice(prev.index! + prev[0].length, cur.index!);
+        const gap = cleanBody.slice(prev.index! + prev[0].length, cur.index!);
         if (!/^\s+$/.test(gap)) break; // punctuation ends the run — no phrase across it
         const stem = normalize(cur[0]);
         if (STOPWORDS.has(stem)) {
