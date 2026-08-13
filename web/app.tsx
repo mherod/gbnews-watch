@@ -54,7 +54,27 @@ function dedupe(comments: WireComment[]): WireComment[] {
   return comments.filter((c) => (seen.has(c.uuid) ? false : (seen.add(c.uuid), true)));
 }
 
-function initials(name: string) {
+const UK_REGIONS = [
+  "London & Westminster",
+  "Yorkshire & Humber",
+  "Manchester & North West",
+  "West Midlands",
+  "East Anglia",
+  "The West Country",
+  "Scottish Highlands",
+  "Wales & The Valleys",
+  "Tyne & Wear",
+  "Kent & South Coast",
+  "Cotswolds & Heart of England",
+];
+
+function authorRegion(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return UK_REGIONS[h % UK_REGIONS.length]!;
+}
+
+function initials(name: string): string {
   const words = name.replace(/[^\p{L}\p{N} ]/gu, "").trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return "?";
   return (words[0]![0]! + (words[1]?.[0] ?? "")).toUpperCase();
@@ -597,6 +617,9 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm 
       <div className="comment__main">
         <div className="comment__head">
           <span className="comment__author">{c.author}</span>
+          <span className="postmark" title={`Dispatched from ${authorRegion(c.author)}`}>
+            📮 {authorRegion(c.author)}
+          </span>
           {c.chatty && (
             <span
               className="chatty"
@@ -818,7 +841,7 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
   const allWeak = trends.length > 0 && trends.every((t) => t.weak);
   return (
     <div className="trends" aria-label="Trending words">
-      <span className="trends__label">🔥 On The Wire</span>
+      <span className="trends__label">🔥 Fleet Street Wire</span>
       {allWeak && <span className="trends__quiet" title="No topic has caught on with more than one person yet">· quiet in the chamber</span>}
       <div className="trends__chips" ref={wireFades}>
         {trends.map((t) => {
@@ -900,11 +923,11 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
       <div className="masthead__row">
         <div className="masthead__title">
           <h1>
-            <UnionJack width={24} height={12} />
+            <UnionJack width={28} height={14} />
             Have Your Say
           </h1>
           <p>
-            Live broadcast from{" "}
+            The Great British Public Forum & Live Broadcast ·{" "}
             <a href="https://www.gbnews.com/watch/live" target="_blank" rel="noreferrer">
               gbnews.com/watch/live
             </a>
@@ -1151,8 +1174,8 @@ function App() {
           <section className={`room-panel${showRoom ? "" : " room-panel--closed"}`}>
             <div className="room-panel__bar">
               <h2 className="room-panel__title">
-                The Taproom
-                <span>the national debate in real time · tethered when argued over a pint · size = volume of chatter · colour = temperature of the room</span>
+                🍺 The Taproom
+                <span>Pint-side politics in real time · topics argued over a pint are tethered · colour = room temperature</span>
               </h2>
               <button
                 type="button"
