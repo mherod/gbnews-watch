@@ -461,26 +461,6 @@ function highlightBody(
     }
   }
 
-  // Sentiment words.
-  SENTIMENT_RE.lastIndex = 0;
-  for (let m = SENTIMENT_RE.exec(text); m !== null; m = SENTIMENT_RE.exec(text)) {
-    const value = LEXICON[m[0].toLowerCase()];
-    if (value !== undefined) {
-      spans.push({ start: m.index, end: m.index + m[0].length, kind: value < 0 ? "neg" : "pos", text: m[0] });
-    }
-    if (m.index === SENTIMENT_RE.lastIndex) SENTIMENT_RE.lastIndex++;
-  }
-
-  // Sentiment emoji.
-  let idx = 0;
-  for (const { segment } of hlSegmenter.segment(text)) {
-    const value = emojiSentiment(segment);
-    if (value !== undefined) {
-      spans.push({ start: idx, end: idx + segment.length, kind: value < 0 ? "neg" : "pos", text: segment });
-    }
-    idx += segment.length;
-  }
-
   if (spans.length === 0) return text;
 
   // Highest-priority spans first, then drop any that overlap an accepted one.
@@ -495,46 +475,29 @@ function highlightBody(
   let last = 0;
   for (const s of chosen) {
     if (s.start > last) nodes.push(text.slice(last, s.start));
-    if (s.kind === "trend" || s.kind === "filter") {
-      const isFilter = s.kind === "filter";
-      nodes.push(
-        // Deliberately a <mark> with button semantics, not a <button>: a real
-        // button box can't fragment across a line break, so a phrase term near
-        // the line end would jump wholesale to the next line and tear a hole
-        // in the prose. The mark wraps like the text it highlights.
-        //
-        // Keyed by span position, not render order: the trend set shifts every
-        // few seconds and rebuilds this array, and an index key would replace
-        // the DOM node under keyboard focus mid-navigation. The position key
-        // also survives the trend→filter class flip on activation.
-        <mark
-          key={s.start}
-          className={isFilter ? "hl hl--filter" : "hl"}
-          role="button"
-          tabIndex={0}
-          aria-pressed={isFilter}
-          aria-label={isFilter ? `Clear filter “${s.text}”` : `Filter comments to “${s.text}”`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onTerm(s.text);
-          }}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter" && e.key !== " ") return;
-            e.preventDefault(); // Space must toggle the filter, not scroll the feed
-            e.stopPropagation();
-            onTerm(s.text);
-          }}
-        >
-          {s.text}
-        </mark>,
-      );
-    } else {
-      nodes.push(
-        <span key={s.start} className={s.kind === "neg" ? "sent sent--neg" : "sent sent--pos"}>
-          {s.text}
-        </span>,
-      );
-    }
+    const isFilter = s.kind === "filter";
+    nodes.push(
+      <mark
+        key={s.start}
+        className={isFilter ? "hl hl--filter" : "hl"}
+        role="button"
+        tabIndex={0}
+        aria-pressed={isFilter}
+        aria-label={isFilter ? `Clear filter “${s.text}”` : `Filter comments to “${s.text}”`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onTerm(s.text);
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          e.stopPropagation();
+          onTerm(s.text);
+        }}
+      >
+        {s.text}
+      </mark>,
+    );
     last = s.end;
   }
   if (last < text.length) nodes.push(text.slice(last));

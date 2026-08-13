@@ -160,11 +160,11 @@ export function Constellation({ graph, filter, onToggle }: {
     const nodeRadius = (n: Node) => radius(massOf(n)) * sizeFactor();
 
     const sim = forceSimulation<Node, Link>([])
-      .force("link", forceLink<Node, Link>([]).id((d) => d.id).distance((l) => (150 - Math.min(70, l.weight * 16)) * sizeFactor()).strength((l) => Math.min(0.9, 0.25 + l.weight * 0.12)))
-      .force("charge", forceManyBody<Node>().strength((d) => (-170 - nodeRadius(d) * 9) * sizeFactor()))
-      .force("collide", forceCollide<Node>().radius((d) => nodeRadius(d) + 14 * sizeFactor()).strength(0.9))
-      .force("x", forceX<Node>().strength(0.045))
-      .force("y", forceY<Node>().strength(0.06))
+      .force("link", forceLink<Node, Link>([]).id((d) => d.id).distance((l) => (165 - Math.min(60, l.weight * 16)) * sizeFactor()).strength((l) => Math.min(0.9, 0.3 + l.weight * 0.12)))
+      .force("charge", forceManyBody<Node>().strength((d) => (-240 - nodeRadius(d) * 12) * sizeFactor()))
+      .force("collide", forceCollide<Node>().radius((d) => nodeRadius(d) + 22 * sizeFactor()).strength(1.0))
+      .force("x", forceX<Node>().strength(0.05))
+      .force("y", forceY<Node>().strength(0.065))
       .stop();
     simRef.current = sim;
 
@@ -365,62 +365,73 @@ export function Constellation({ graph, filter, onToggle }: {
         ctx.arc(n.px, n.py, glowR, 0, Math.PI * 2);
         ctx.fill();
 
-        // Core, lit from the top-left so a body reads as a sphere rather than a
-        // flat disc — the highlight also separates overlapping nodes.
-        ctx.globalAlpha = (n.weak ? 0.5 : 1) * dim;
+        // Core enamel disc
+        ctx.globalAlpha = (n.weak ? 0.6 : 1) * dim;
         const body = ctx.createRadialGradient(
-          n.px - r * 0.35, n.py - r * 0.4, r * 0.1,
+          n.px - r * 0.3, n.py - r * 0.35, r * 0.05,
           n.px, n.py, r,
         );
-        body.addColorStop(0, tint(n, n.weak ? 0.5 : 1));
-        body.addColorStop(1, tint(n, n.weak ? 0.22 : 0.72));
+        body.addColorStop(0, tint(n, n.weak ? 0.6 : 1));
+        body.addColorStop(0.85, tint(n, n.weak ? 0.3 : 0.85));
+        body.addColorStop(1, tint(n, n.weak ? 0.2 : 0.7));
         ctx.beginPath();
         ctx.arc(n.px, n.py, r, 0, Math.PI * 2);
         ctx.fillStyle = body;
         ctx.fill();
-        ctx.lineWidth = isActive ? 3 : isHovered ? 2.5 : 1.5;
+        ctx.lineWidth = isActive ? 3.5 : isHovered ? 2.5 : 2;
         ctx.strokeStyle = isActive ? accent : colour;
         ctx.stroke();
 
-        // Label: inside the body only when it genuinely fits, otherwise beneath
-        // it. Centring every label meant long names ran straight over the rim.
+        // Label: inside the body only when it genuinely fits, otherwise beneath it with a backing pill.
         ctx.globalAlpha = dim;
         ctx.font = labelFont(n, r);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         const text = labelOf(n, w);
-        const inside = ctx.measureText(text).width <= r * 1.65;
-        const ty = inside ? n.py : n.py + r + 12;
-        // Stroke in the page colour first: a halo keeps the text readable over
-        // a tether or a neighbour's glow without a muddy drop shadow.
-        ctx.lineJoin = "round";
-        ctx.lineWidth = 3.5;
-        ctx.strokeStyle = halo;
-        ctx.strokeText(text, n.px, ty);
-        ctx.fillStyle = inside && !n.weak ? ink : n.weak ? faint : ink;
+        const textMetrics = ctx.measureText(text);
+        const textW = textMetrics.width;
+        const inside = textW <= r * 1.55;
+        const ty = inside ? n.py : n.py + r + 13;
+
+        if (!inside) {
+          // Draw solid enamel pill behind outside label for guaranteed legibility over tethers
+          ctx.fillStyle = panel;
+          ctx.globalAlpha = 0.92 * dim;
+          roundRect(ctx, n.px - textW / 2 - 6, ty - 8, textW + 12, 16, 4);
+          ctx.fill();
+          ctx.strokeStyle = line;
+          ctx.lineWidth = 1;
+          roundRect(ctx, n.px - textW / 2 - 6, ty - 8, textW + 12, 16, 4);
+          ctx.stroke();
+          ctx.globalAlpha = dim;
+        }
+
+        ctx.fillStyle = inside && !n.weak ? "#ffffff" : ink;
         ctx.fillText(text, n.px, ty);
 
-        // voices, tucked under whichever position the label took
+        // voices count tucked neatly under
         ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = halo;
-        const vy = inside ? n.py + r + 12 : ty + 13;
-        const voices = `${n.voices} ${n.voices === 1 ? "voice" : "voices"}`;
-        ctx.strokeText(voices, n.px, vy);
         ctx.fillStyle = faint;
+        const vy = inside ? n.py + r + 12 : ty + 15;
+        const voices = `${n.voices} ${n.voices === 1 ? "voice" : "voices"}`;
         ctx.fillText(voices, n.px, vy);
 
-        // On hover, which broadcast the argument belongs to — learned server-
-        // side from what was on air whenever the topic was reinforced. Hover
-        // only: on every body at once it would just be twelve lines of noise.
+        // On hover, which broadcast the argument belongs to
         const during = n.onAir?.[0];
         if (isHovered && during) {
           const max = canvasWidthChars(w);
           const title = during.title.length > max ? `${during.title.slice(0, max - 1).trimEnd()}…` : during.title;
           const line = `during ${title} · ${Math.round(during.share * 100)}%`;
-          // Flip above the node when drawing below would clip against the canvas floor.
-          const cy = vy + 18 > h ? Math.max(12, n.py - r - 12) : vy + 13;
-          ctx.strokeText(line, n.px, cy);
+          const cy = vy + 18 > h ? Math.max(12, n.py - r - 14) : vy + 14;
+          const lineMetrics = ctx.measureText(line);
+          ctx.fillStyle = panel;
+          ctx.globalAlpha = 0.95;
+          roundRect(ctx, n.px - lineMetrics.width / 2 - 6, cy - 8, lineMetrics.width + 12, 16, 4);
+          ctx.fill();
+          ctx.strokeStyle = line;
+          ctx.lineWidth = 1;
+          roundRect(ctx, n.px - lineMetrics.width / 2 - 6, cy - 8, lineMetrics.width + 12, 16, 4);
+          ctx.stroke();
           ctx.fillStyle = ink;
           ctx.fillText(line, n.px, cy);
         }

@@ -1,33 +1,37 @@
 :root {
-  --bg: #f6f7f9;
+  --bg: #f5f7fa;
   --panel: #ffffff;
-  --panel-2: #f0f2f5;
-  --line: #e4e7ec;
-  --ink: #14181f;
-  --ink-soft: #5b6472;
-  --ink-faint: #8b95a4;
-  --accent: #1a3fb8;
-  --accent-soft: #e8edfb;
-  --live: #16a34a;
-  --warn: #c2410c;
-  --shadow: 0 1px 2px rgb(20 24 31 / 0.06), 0 8px 24px rgb(20 24 31 / 0.04);
+  --panel-2: #edf1f7;
+  --line: #dbe2ea;
+  --ink: #0d131f;
+  --ink-soft: #475569;
+  --ink-faint: #78889b;
+  --accent: #1d4ed8;
+  --accent-soft: #eff4ff;
+  --routemaster: #dc2626;
+  --live: #15803d;
+  --warn: #b45309;
+  --gold: #d97706;
+  --shadow: 0 1px 3px rgba(13, 19, 31, 0.06), 0 8px 24px rgba(13, 19, 31, 0.04);
   --radius: 12px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0e1116;
-    --panel: #161b22;
-    --panel-2: #1c222b;
-    --line: #262d38;
-    --ink: #e8ecf2;
-    --ink-soft: #9aa5b4;
-    --ink-faint: #6b7787;
-    --accent: #7d9cff;
-    --accent-soft: #1b2438;
-    --live: #3fca7a;
-    --warn: #fb923c;
-    --shadow: none;
+    --bg: #090c13;
+    --panel: #111622;
+    --panel-2: #171f2f;
+    --line: #222c3d;
+    --ink: #ecf2f8;
+    --ink-soft: #9aa7b9;
+    --ink-faint: #606e82;
+    --accent: #3b82f6;
+    --accent-soft: #182235;
+    --routemaster: #ef4444;
+    --live: #22c55e;
+    --warn: #f59e0b;
+    --gold: #fbbf24;
+    --shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
   }
 }
 
@@ -35,20 +39,14 @@
   box-sizing: border-box;
 }
 
-/* One focus language everywhere: the UA default ring is a squared halo that
-   sits awkwardly on pill-shaped controls. Outline follows border-radius, so
-   every chip, toggle and link gets a ring in its own silhouette. */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 html {
-  /* Stop Safari arbitrarily rescaling text after an orientation change.
-     Pinch-zoom still works — this only pins the automatic adjustment. */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  /* The masthead is sticky, so anything scrolled into view must clear it. */
   scroll-padding-top: calc(env(safe-area-inset-top) + 64px);
 }
 
@@ -63,92 +61,96 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 16px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font: 15px/1.55 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
 body {
-  /* The document is the scroller here, so keep the elastic bounce from
-     chaining into a pull-to-refresh while reading the feed. */
   overscroll-behavior-y: contain;
 }
 
 .shell {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
-  /* Bottom padding clears the home indicator; env() is 0 elsewhere. */
-  padding: 20px 20px calc(64px + env(safe-area-inset-bottom));
+  padding: 16px 20px calc(64px + env(safe-area-inset-bottom));
   padding-left: max(20px, env(safe-area-inset-left));
   padding-right: max(20px, env(safe-area-inset-right));
 }
 
-/* ---------- header ---------- */
+/* ---------- masthead ---------- */
 
 .masthead {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  /* Safari still needs the prefix — without it the masthead simply doesn't blur. */
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--line);
-  /* Clear the notch/Dynamic Island; env() resolves to 0 off-iOS, so the
-     padding is unchanged everywhere else. */
-  padding: calc(16px + env(safe-area-inset-top)) 20px 14px;
+  padding: calc(12px + env(safe-area-inset-top)) 20px 12px;
   padding-left: max(20px, env(safe-area-inset-left));
   padding-right: max(20px, env(safe-area-inset-right));
 }
 
 .masthead__row {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
 .masthead__title h1 {
   margin: 0;
   font-size: 19px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .masthead__title p {
   margin: 2px 0 0;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--ink-faint);
 }
 
 .masthead__title a {
   color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--line);
+}
+
+.masthead__title a:hover {
+  text-decoration-color: var(--accent);
 }
 
 .meters {
   display: flex;
   align-items: center;
-  gap: 20px;
-  /* Wrap rather than push the row wider than the viewport — the rate meter's
-     sparkline is the widest item and used to force a page-level scroll. */
+  gap: 14px;
   flex-wrap: wrap;
-  row-gap: 8px;
+  row-gap: 6px;
   min-width: 0;
   font-variant-numeric: tabular-nums;
 }
 
+/* London Underground Roundel & Broadcaster Mood Badges */
 .mood {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-size: 12px;
-  font-weight: 600;
-  padding: 3px 9px 3px 7px;
+  font-weight: 650;
+  padding: 3px 10px 3px 8px;
   border-radius: 999px;
   white-space: nowrap;
   cursor: default;
+  border: 1px solid transparent;
 }
 
 .mood__emoji {
@@ -156,52 +158,55 @@ body {
 }
 
 .mood__detail {
-  font-weight: 500;
+  font-weight: 550;
   opacity: 0.85;
   font-variant-numeric: tabular-nums;
 }
 
 .mood--heated {
-  background: color-mix(in srgb, #ef4444 18%, transparent);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--routemaster) 16%, transparent);
+  color: var(--routemaster);
+  border-color: color-mix(in srgb, var(--routemaster) 30%, transparent);
 }
 .mood--grumbly {
   background: color-mix(in srgb, var(--warn) 16%, transparent);
   color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
 }
 .mood--mixed {
-  background: color-mix(in srgb, var(--ink-faint) 18%, transparent);
+  background: color-mix(in srgb, var(--ink-faint) 16%, transparent);
   color: var(--ink-soft);
+  border-color: color-mix(in srgb, var(--ink-faint) 25%, transparent);
 }
 .mood--warm {
   background: color-mix(in srgb, var(--live) 16%, transparent);
   color: var(--live);
+  border-color: color-mix(in srgb, var(--live) 30%, transparent);
 }
 .mood--buzzing {
-  background: color-mix(in srgb, var(--live) 24%, transparent);
+  background: color-mix(in srgb, var(--live) 22%, transparent);
   color: var(--live);
+  border-color: color-mix(in srgb, var(--live) 40%, transparent);
 }
 
-/* What the channel is broadcasting right now, between the meters and the
-   trend chips. One line, truncating from the least important part inward. */
+/* On-Air Service Ticker */
 .onair {
-  max-width: 720px;
+  max-width: 760px;
   margin: 8px auto 0;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--ink-soft);
   min-width: 0;
   white-space: nowrap;
 }
 
 .onair__type {
-  align-self: center;
-  font-size: 10.5px;
-  font-weight: 650;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   padding: 2px 7px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--ink-faint) 18%, transparent);
@@ -210,18 +215,14 @@ body {
 }
 
 .onair__type--live {
-  background: color-mix(in srgb, var(--live) 16%, transparent);
-  /* Pure var(--live) on the tint reads 2.6:1 in light mode — below AA for
-     10.5px text. Mixing toward the ink passes both themes and stays green. */
-  color: color-mix(in srgb, var(--live) 60%, var(--ink));
+  background: color-mix(in srgb, var(--routemaster) 16%, transparent);
+  color: var(--routemaster);
+  border: 1px solid color-mix(in srgb, var(--routemaster) 30%, transparent);
 }
 
 .onair__title {
   font-weight: 650;
   color: var(--ink);
-  /* Truncation is unconditional: a long special's title otherwise widens the
-     page at 561–720px, where the mobile rules don't apply — the same
-     masthead-widening failure the chips row once had. */
   flex-shrink: 1;
   min-width: 0;
   overflow: hidden;
@@ -233,8 +234,6 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-  /* Presenters give way three times faster than the title, which is the
-     part worth reading. */
   flex-shrink: 3;
 }
 
@@ -253,14 +252,14 @@ body {
 
 .meter b {
   display: block;
-  font-size: 18px;
-  font-weight: 650;
+  font-size: 17px;
+  font-weight: 700;
 }
 
 .meter span {
-  font-size: 10.5px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   color: var(--ink-faint);
   white-space: nowrap;
 }
@@ -271,7 +270,7 @@ body {
 
 .meter--rate {
   text-align: left;
-  min-width: 0; /* let the sparkline shrink instead of overflowing the row */
+  min-width: 0;
 }
 
 .meter__rateline {
@@ -283,15 +282,13 @@ body {
 .spark {
   display: block;
   overflow: visible;
-  /* The markup carries width="135"; scale it fluidly so a narrow viewport
-     shrinks the bars rather than pushing the whole masthead sideways. */
-  width: clamp(72px, 26vw, 135px);
+  width: clamp(64px, 20vw, 110px);
   height: auto;
 }
 
 .spark__bar {
   fill: var(--ink-faint);
-  opacity: 0.55;
+  opacity: 0.65;
   transition: height 0.3s ease, y 0.3s ease;
 }
 
@@ -300,115 +297,116 @@ body {
   opacity: 1;
 }
 
+/* London Roundel Live Status */
 .status {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  font-weight: 550;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--ink-soft);
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
 }
 
 .status__dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--ink-faint);
+}
+
+.status--live {
+  border-color: color-mix(in srgb, var(--live) 35%, transparent);
+  color: var(--live);
 }
 
 .status--live .status__dot {
   background: var(--live);
   box-shadow: 0 0 0 0 color-mix(in srgb, var(--live) 60%, transparent);
-  animation: pulse 2.4s ease-out infinite;
-}
-
-.status--live {
-  color: var(--live);
-}
-
-.status--down .status__dot {
-  background: var(--warn);
+  animation: pulse 2.2s ease-out infinite;
 }
 
 .status--down {
-  color: var(--warn);
+  border-color: color-mix(in srgb, var(--routemaster) 35%, transparent);
+  color: var(--routemaster);
+}
+
+.status--down .status__dot {
+  background: var(--routemaster);
 }
 
 @keyframes pulse {
   70% {
-    box-shadow: 0 0 0 7px transparent;
+    box-shadow: 0 0 0 6px transparent;
   }
   100% {
     box-shadow: 0 0 0 0 transparent;
   }
 }
 
-/* ---------- trending ---------- */
+/* ---------- trending (On The Wire) ---------- */
 
 .trends {
-  max-width: 720px;
-  margin: 12px auto 0;
-  padding-top: 12px;
+  max-width: 760px;
+  margin: 10px auto 0;
+  padding-top: 10px;
   border-top: 1px solid var(--line);
   display: flex;
   align-items: center;
-  gap: 10px;
-  animation: trends-in 0.35s ease;
-}
-
-@keyframes trends-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
+  gap: 8px;
 }
 
 .trends__label {
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--warn);
+  color: var(--routemaster);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
+/* Smooth single-line horizontal scroller on all screens */
 .trends__chips {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   overflow-x: auto;
-  overscroll-behavior-x: contain; /* don't hand the swipe back to the page */
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
-  /* A flex item defaults to min-width:auto, which refuses to shrink below its
-     content — the chips row then widened the masthead instead of scrolling. */
   flex: 1 1 auto;
   min-width: 0;
+  flex-wrap: nowrap;
 }
 
-/* Whichever edge still hides chips gets a fade, set from a scroll listener —
-   a hard-clipped chip reads as the end of the list, so more must look like
-   more. The scrollbar is already hidden, so the mask covers no affordance. */
+.trends__chips::-webkit-scrollbar {
+  display: none;
+}
+
 .trends__chips[data-fade-r="1"] {
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
 }
 
 .trends__chips[data-fade-l="1"] {
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px);
-  mask-image: linear-gradient(to right, transparent, #000 28px);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 24px);
+  mask-image: linear-gradient(to right, transparent, #000 24px);
 }
 
 .trends__chips[data-fade-l="1"][data-fade-r="1"] {
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
-  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
 }
 
 .trends__emoji {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-left: auto;
-  padding-left: 10px;
+  padding-left: 8px;
   border-left: 1px solid var(--line);
   flex-shrink: 0;
 }
@@ -417,9 +415,9 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 15px;
-  padding: 2px 7px 2px 5px;
-  border: none;
+  font-size: 14px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
   color: inherit;
@@ -428,10 +426,10 @@ body {
   transition: background 0.15s ease, transform 0.08s ease;
 }
 
-/* Gated: on touch, :hover latches after a tap and the chip stays lit. */
 @media (hover: hover) {
   .emoji-chip:hover {
-    background: color-mix(in srgb, var(--ink-faint) 16%, transparent);
+    background: var(--panel-2);
+    border-color: var(--line);
   }
 }
 
@@ -441,16 +439,13 @@ body {
 
 .emoji-chip--active {
   background: var(--accent);
-}
-
-.emoji-chip__glyph {
-  line-height: 1;
+  border-color: var(--accent);
 }
 
 .emoji-chip i {
   font-style: normal;
-  font-size: 11px;
-  font-weight: 650;
+  font-size: 10.5px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--ink-faint);
 }
@@ -459,117 +454,29 @@ body {
   color: #fff;
 }
 
-@media (max-width: 560px) {
-  /*
-   * The label and the emoji strip are both unshrinkable, so on a phone they
-   * took 300 of 347px and left the chip scroller 27px — not one chip fitted.
-   * Give the chips their own full-width line underneath instead.
-   */
-  .trends {
-    flex-wrap: wrap;
-    row-gap: 10px;
-  }
-  .trends__label {
-    order: 1;
-  }
-  .trends__emoji {
-    order: 2;
-    border-left: none;
-    padding-left: 0;
-  }
-  /*
-   * Wrap the chips onto as many lines as they need rather than hiding them in
-   * a horizontal scroller — a clipped chip reads as broken, and a topic nobody
-   * scrolls to may as well not be listed.
-   */
-  .trends__chips {
-    order: 3;
-    flex-basis: 100%;
-    flex-wrap: wrap;
-    row-gap: 8px;
-    overflow: visible; /* no scroller, so nothing to fade or contain */
-  }
-}
-
-/*
- * Every tap target: kill the residual double-tap-zoom delay and the grey iOS
- * flash, and stop a long-press raising the copy/share sheet on a control.
- */
-.trends__chip,
-.emoji-chip,
-.room-panel__toggle,
-.feed__clear,
-.comment__more,
-.replyto--linked,
-.hl {
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  -webkit-touch-callout: none;
-}
-
-/*
- * Touch targets. The chips are deliberately small type, so rather than inflate
- * the masthead we grow the *hit area* with a transparent overlay — a finger
- * gets the 44px Apple HIG / WCAG target while the design keeps its scale.
- */
-@media (pointer: coarse) {
-  /*
-   * Chips grow a real touch height rather than wearing an invisible overlay.
-   * Once they wrap, a 44px overlay on a 21px chip spills 11.5px into the row
-   * below and starts stealing its taps — and a real box can't do that.
-   * 36px is short of Apple's 44px floor, but the chips row is inside a sticky
-   * masthead: at 44px, three wrapped rows push the header past a fifth of a
-   * phone screen and permanently cover the feed.
-   */
-  .trends__chip {
-    min-height: 36px;
-  }
-
-  .emoji-chip,
-  .room-panel__toggle,
-  .feed__clear {
-    position: relative;
-  }
-
-  /* These sit on a single line, so an overlay can't overlap a neighbouring row. */
-  .emoji-chip::after,
-  .room-panel__toggle::after,
-  .feed__clear::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 50%;
-    height: 44px;
-    transform: translateY(-50%);
-  }
-}
-
-.trends__chips::-webkit-scrollbar {
-  display: none;
-}
-
+/* London Tube Line Pill Tags */
 .trends__chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 6px 3px 10px;
-  border: none;
+  padding: 3px 8px 3px 10px;
+  border: 1px solid var(--line);
   border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--panel);
+  color: var(--ink);
   font-family: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
-  animation: trends-in 0.35s ease;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.08s ease;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.08s ease;
 }
 
 @media (hover: hover) {
   .trends__chip:hover {
-    background: color-mix(in srgb, var(--accent) 28%, transparent);
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+    color: var(--accent);
   }
 }
 
@@ -579,17 +486,19 @@ body {
 
 .trends__chip--active {
   background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 
 .trends__chip i {
   font-style: normal;
-  font-size: 11px;
-  font-weight: 650;
+  font-size: 10px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  padding: 1px 6px;
+  padding: 1px 5px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  background: var(--panel-2);
+  color: var(--ink-soft);
 }
 
 .trends__chip--active i {
@@ -597,13 +506,11 @@ body {
   color: #fff;
 }
 
-/* Momentary ▲/▼ shown on a chip that just changed rank. */
 .trends__caret {
   font-size: 8px;
   line-height: 1;
   font-weight: 700;
   margin-right: -2px;
-  animation: caret-in 0.3s ease both;
 }
 
 .trends__caret--up {
@@ -618,42 +525,8 @@ body {
   color: rgb(255 255 255 / 0.9);
 }
 
-@keyframes caret-in {
-  from {
-    opacity: 0;
-    transform: translateY(var(--caret-from, 3px));
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.trends__caret--up {
-  --caret-from: 3px;
-}
-
-.trends__caret--down {
-  --caret-from: -3px;
-}
-
-/* Single-voice filler: muted so it never reads as a genuine trend. */
 .trends__chip--weak {
-  background: color-mix(in srgb, var(--ink-faint) 12%, transparent);
-  color: var(--ink-faint);
-  font-weight: 500;
-  animation: none;
-}
-
-@media (hover: hover) {
-  .trends__chip--weak:hover {
-    background: color-mix(in srgb, var(--ink-faint) 20%, transparent);
-  }
-}
-
-.trends__chip--weak i {
-  background: color-mix(in srgb, var(--ink-faint) 18%, transparent);
-  color: var(--ink-faint);
+  opacity: 0.65;
 }
 
 .trends__quiet {
@@ -664,15 +537,14 @@ body {
   flex-shrink: 0;
 }
 
-/* "The Room" — live topic constellation */
+/* ---------- The Taproom (Constellation Panel) ---------- */
 
 .room-panel {
-  margin: 0 0 18px;
+  margin: 0 0 16px;
   border: 1px solid var(--line);
-  border-radius: 16px;
-  background:
-    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
-    var(--panel);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
   overflow: hidden;
 }
 
@@ -681,23 +553,24 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 11px 14px;
+  padding: 9px 14px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
 }
 
 .room-panel__title {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   margin: 0;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
 
 .room-panel__title span {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 500;
-  letter-spacing: 0;
   color: var(--ink-faint);
 }
 
@@ -705,21 +578,20 @@ body {
   flex-shrink: 0;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: transparent;
-  color: var(--ink-faint);
+  background: var(--panel);
+  color: var(--ink-soft);
   font-family: inherit;
   font-size: 11px;
-  font-weight: 600;
-  padding: 4px 11px;
+  font-weight: 650;
+  padding: 3px 10px;
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.08s ease;
+  transition: all 0.15s ease;
 }
 
 @media (hover: hover) {
   .room-panel__toggle:hover {
     color: var(--ink);
     border-color: var(--ink-faint);
-    background: var(--panel-2);
   }
 }
 
@@ -728,24 +600,19 @@ body {
 }
 
 .room-panel--closed .room-panel__bar {
-  padding-bottom: 11px;
+  border-bottom: none;
 }
 
+/* Compact room height so comments are immediately visible above fold */
 .room {
   position: relative;
-  /* dvh, not vh — vh ignores the iOS URL bar and clipped the canvas on load.
-     Height lives in a custom property so the narrow and reduced-motion
-     variants below can restate it without fighting over source order. */
-  --room-height: clamp(300px, 58dvh, 640px);
+  --room-height: clamp(230px, 36dvh, 360px);
   height: var(--room-height);
-  border-top: 1px solid var(--line);
 }
 
-/* On a phone the header already owns the fold, so the map takes a smaller
-   slice of it — still roomier than it was, without burying the feed. */
 @media (max-width: 560px) {
   .room {
-    --room-height: clamp(300px, 50dvh, 460px);
+    --room-height: clamp(200px, 32dvh, 280px);
   }
 }
 
@@ -764,7 +631,7 @@ body {
   justify-content: center;
   margin: 0;
   color: var(--ink-faint);
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
 .sr-only {
@@ -794,7 +661,6 @@ body {
 }
 
 .room__topic-btn {
-  /* sr-only when unfocused */
   position: absolute;
   width: 1px;
   height: 1px;
@@ -812,33 +678,24 @@ body {
   height: auto;
   clip: auto;
   white-space: normal;
-  padding: 5px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 9999px;
+  padding: 4px 9px;
+  font-size: 11.5px;
+  font-weight: 650;
+  border-radius: 999px;
   color: var(--ink);
-  background: var(--surface, #1e293b);
-  border: 1px solid var(--accent, #3b82f6);
+  background: var(--panel);
+  border: 1px solid var(--accent);
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
   pointer-events: auto;
   cursor: pointer;
 }
 
 .room__topic-btn[aria-pressed="true"]:focus-visible {
-  background: var(--accent, #3b82f6);
+  background: var(--accent);
   color: #fff;
 }
 
-/* Last, so it wins on any viewport: less canvas means less motion to sit
-   through when the reader has asked for less of it. */
-@media (prefers-reduced-motion: reduce) {
-  .room {
-    --room-height: clamp(280px, 42vh, 420px);
-  }
-}
-
 /* filter status line */
-
 .feed__meta--filter {
   display: flex;
   align-items: center;
@@ -847,19 +704,20 @@ body {
 
 .feed__meta--filter b {
   color: var(--accent);
-  font-weight: 650;
+  font-weight: 700;
 }
 
 .feed__clear {
   border: 1px solid var(--line);
-  background: transparent;
+  background: var(--panel);
   color: var(--ink-soft);
   border-radius: 999px;
   padding: 2px 10px;
   font: inherit;
-  font-size: 12px;
+  font-size: 11.5px;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.08s ease;
+  transition: all 0.15s ease;
 }
 
 @media (hover: hover) {
@@ -873,17 +731,10 @@ body {
   transform: scale(0.96);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .trends,
-  .trends__chip {
-    animation: none;
-  }
-}
-
-/* ---------- feed ---------- */
+/* ---------- comment feed ---------- */
 
 .feed__meta {
-  margin: 0 4px 12px;
+  margin: 0 4px 10px;
   font-size: 12px;
   color: var(--ink-faint);
   font-variant-numeric: tabular-nums;
@@ -906,38 +757,29 @@ body {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 13px 15px;
   box-shadow: var(--shadow);
-  animation: arrive 0.42s cubic-bezier(0.2, 0.7, 0.3, 1);
+  animation: arrive 0.35s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
-/* Each freshly-mounted comment flashes an accent wash that fades to normal, so
-   new arrivals catch the eye as they slot in at the top. */
 @keyframes arrive {
   0% {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(-6px);
     background: var(--accent-soft);
-    border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-  }
-  60% {
-    opacity: 1;
-    transform: translateY(0);
   }
   100% {
+    opacity: 1;
+    transform: translateY(0);
     background: var(--panel);
-    border-color: var(--line);
   }
 }
 
 .comment--reply {
-  margin-left: 22px;
+  margin-left: 20px;
   background: var(--panel-2);
 }
 
-/* Reply accent stripe: a pseudo-element, never a grid child, so it cannot
-   disturb the avatar + main columns. Colour comes from the --rail variable set
-   on the <li>. */
 .comment--reply::before {
   content: "";
   position: absolute;
@@ -947,49 +789,7 @@ body {
   width: 3px;
   border-radius: var(--radius) 0 0 var(--radius);
   background: var(--rail, var(--accent));
-  opacity: 0.9;
-}
-
-.comment--flash {
-  animation: flash 1.4s ease-out;
-}
-
-@keyframes flash {
-  0%,
-  30% {
-    background: var(--accent-soft);
-    border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
-  }
-  100% {
-    background: var(--panel);
-    border-color: var(--line);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-  .trends,
-  .trends__chip,
-  .trends__caret,
-  .emoji-chip,
-  .room-panel__toggle,
-  .feed__clear,
-  .comment,
-  .comment--flash,
-  .status--live .status__dot,
-  .spark__bar,
-  .waiting__bars i {
-    animation: none !important;
-    transition: none !important;
-    transform: none !important;
-  }
+  opacity: 0.95;
 }
 
 .avatar {
@@ -999,7 +799,7 @@ body {
   display: grid;
   place-items: center;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 700;
   color: #fff;
   letter-spacing: 0.02em;
   -webkit-user-select: none;
@@ -1012,15 +812,15 @@ body {
 
 .comment__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: 7px;
+  margin-bottom: 5px;
 }
 
 .comment__author {
-  font-weight: 600;
-  font-size: 14.5px;
+  font-weight: 650;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 
@@ -1031,15 +831,47 @@ body {
 }
 
 .comment__time {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--ink-faint);
   font-variant-numeric: tabular-nums;
   margin-left: auto;
   white-space: nowrap;
-  cursor: default;
 }
 
-/* reply-to chip + quote */
+/* London Royal Mail Postage Stamp Style */
+.tag {
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.tag--top {
+  background: color-mix(in srgb, var(--routemaster) 14%, transparent);
+  color: var(--routemaster);
+  border: 1px dashed color-mix(in srgb, var(--routemaster) 40%, transparent);
+}
+
+.tag--pin {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.chatty {
+  font-size: 10.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gold) 28%, transparent);
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
 
 .replyto {
   display: flex;
@@ -1047,20 +879,20 @@ body {
   gap: 6px;
   max-width: 100%;
   margin: 0 0 6px;
-  padding: 4px 9px;
+  padding: 3px 8px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: transparent;
+  border-radius: 6px;
+  background: var(--panel);
   color: var(--ink-soft);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 12px;
   text-align: left;
   cursor: default;
 }
 
 .replyto--linked {
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: all 0.15s ease;
 }
 
 @media (hover: hover) {
@@ -1077,10 +909,7 @@ body {
 
 .replyto__name {
   color: var(--accent);
-  font-weight: 600;
-  /* Display names are user content and can be absurd ("Baron Burnham Von
-     Eyelash Formerly Uturn-Backstabba"). flex-shrink:0 let one push the whole
-     page sideways, so truncate instead of refusing to shrink. */
+  font-weight: 650;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1104,111 +933,41 @@ body {
 
 .comment__body {
   margin: 0;
-  font-size: 15px;
+  font-size: 14.5px;
   color: var(--ink);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* Clamp long bodies to ~6 lines; the expand button toggles this off. max-height
-   (not -webkit-line-clamp) so scrollHeight vs clientHeight stays measurable. */
 .comment__body--clamped {
-  max-height: 9.3em; /* ~6 lines at 1.55 line-height */
+  max-height: 9.3em;
   overflow: hidden;
 }
 
-/* Fade the cut-off edge only when the body is actually truncated. */
 .comment__body--faded {
   -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent);
   mask-image: linear-gradient(to bottom, #000 72%, transparent);
 }
 
-/* Live-trend highlights inside message bodies. */
+/* Subtle, legible highlights */
 .hl {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: inherit;
   border-radius: 3px;
-  padding: 0 2px;
+  padding: 0 3px;
   cursor: pointer;
   transition: background 0.12s ease;
 }
 
 @media (hover: hover) {
   .hl:hover {
-    background: color-mix(in srgb, var(--accent) 38%, transparent);
+    background: color-mix(in srgb, var(--accent) 32%, transparent);
   }
-}
-
-/* Marks are focusable buttons (role="button" in the markup). The global ring
-   applies; a tighter offset stops it grazing the lines above and below at
-   this line-height. */
-.hl:focus-visible {
-  outline-offset: 1px;
 }
 
 .hl--filter {
-  background: color-mix(in srgb, var(--warn) 30%, transparent);
-  font-weight: 600;
-}
-
-@media (hover: hover) {
-  .hl--filter:hover {
-    background: color-mix(in srgb, var(--warn) 45%, transparent);
-  }
-}
-
-/* Sentiment tint — where the heat (or warmth) is. */
-.sent {
-  border-radius: 3px;
-  padding: 0 1px;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
-}
-
-.sent--neg {
-  background: color-mix(in srgb, #ef4444 20%, transparent);
-  color: color-mix(in srgb, #ef4444 55%, var(--ink));
-}
-
-.sent--pos {
-  background: color-mix(in srgb, var(--live) 20%, transparent);
-  color: color-mix(in srgb, var(--live) 45%, var(--ink));
-}
-
-.comment__more {
-  margin-top: 6px;
-  padding: 2px 8px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.08s ease;
-}
-
-@media (hover: hover) {
-  .comment__more:hover {
-    background: var(--accent-soft);
-  }
-}
-
-.comment__more:active {
-  transform: scale(0.97);
-}
-
-.chatty {
-  font-size: 11px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 14%, transparent);
-  padding: 1px 7px;
-  border-radius: 999px;
-  white-space: nowrap;
-  cursor: default;
+  background: color-mix(in srgb, var(--gold) 28%, transparent);
+  font-weight: 650;
 }
 
 .comment__foot {
@@ -1226,143 +985,71 @@ body {
 }
 
 .stat--like {
-  color: #e0567a;
+  color: var(--routemaster);
+  font-weight: 600;
 }
 
 .stat--replies {
   color: var(--accent);
+  font-weight: 600;
 }
 
-.tag {
-  font-size: 10.5px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-  padding: 2px 6px;
-  border-radius: 5px;
-}
+/* ---------- mobile adjustments ---------- */
 
-.tag--top {
-  background: color-mix(in srgb, #eab308 20%, transparent);
-  color: #b78a00;
-}
-
-.tag--pin {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-@media (prefers-color-scheme: dark) {
-  .tag--top {
-    color: #f5c542;
+@media (max-width: 560px) {
+  .shell {
+    padding: 12px 12px 48px;
   }
-}
-
-/* ---------- empty state ---------- */
-
-.waiting {
-  text-align: center;
-  padding: 64px 20px;
-  color: var(--ink-faint);
-}
-
-/* The boot copy holds back for a beat: a snapshot usually arrives within
-   ~300ms, and an empty state that flashes first reads as a glitch. Delayed
-   appearance, not motion — it stays under reduced motion. */
-.waiting--boot {
-  animation: waiting-appear 0.3s ease 0.35s backwards;
-}
-
-@keyframes waiting-appear {
-  from {
-    opacity: 0;
+  .masthead {
+    padding: 10px 12px 9px;
   }
-}
-
-.waiting__bars {
-  display: inline-flex;
-  gap: 4px;
-  margin-bottom: 14px;
-}
-
-.waiting__bars i {
-  width: 3px;
-  height: 18px;
-  border-radius: 2px;
-  background: var(--ink-faint);
-  animation: bounce 1.1s ease-in-out infinite;
-}
-
-.waiting__bars i:nth-child(2) {
-  animation-delay: 0.15s;
-}
-.waiting__bars i:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-@keyframes bounce {
-  0%,
-  100% {
-    transform: scaleY(0.4);
-    opacity: 0.5;
+  .masthead__row {
+    gap: 10px;
   }
-  50% {
-    transform: scaleY(1);
-    opacity: 1;
+  .meters {
+    gap: 10px;
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .comment {
+    grid-template-columns: 32px 1fr;
+    gap: 10px;
+    padding: 11px 12px;
+  }
+  .comment--reply {
+    margin-left: 12px;
+  }
+  .avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 11px;
+  }
+  .onair__until {
+    display: none;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .trends,
+  .trends__chip,
+  .trends__caret,
+  .emoji-chip,
+  .room-panel__toggle,
+  .feed__clear,
+  .comment,
+  .status--live .status__dot,
+  .spark__bar,
   .waiting__bars i {
-    animation: none;
-  }
-  /* The delayed appearance stays: it prevents a flash rather than adding one. */
-}
-
-@media (max-width: 560px) {
-  .shell {
-    padding: 16px 14px 48px;
-  }
-  .masthead {
-    padding: 13px 14px 11px;
-  }
-  .masthead__row {
-    gap: 12px;
-  }
-  .meters {
-    gap: 14px;
-    width: 100%;
-    justify-content: flex-start;
-  }
-  /*
-   * Wrapped chips make this header tall and, worse, variably tall — it grows
-   * with however many topics are live. A sticky bar that can eat 45% of a
-   * phone screen is worse than no sticky bar, so on mobile the masthead
-   * scrolls away and the feed gets the whole viewport.
-   */
-  .masthead {
-    position: static;
-  }
-  .comment {
-    grid-template-columns: 30px 1fr;
-    gap: 10px;
-    padding: 12px 13px;
-  }
-  .comment--reply {
-    margin-left: 14px;
-  }
-  .avatar {
-    width: 30px;
-    height: 30px;
-    font-size: 11px;
-  }
-  .comment__time {
-    margin-left: auto;
-  }
-  /* A phone-width line can't hold title + presenters + end time — the end
-     time steps aside; truncation is already unconditional above. */
-  .onair__until {
-    display: none;
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
   }
 }
