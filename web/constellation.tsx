@@ -274,64 +274,59 @@ export function Constellation({ graph, filter, onToggle }: {
       const active = filterRef.current?.toLowerCase() ?? null;
       const hover = hoverRef.current;
 
-      // --- tethers: topics said in the same breath, with the traffic between them ---
-      for (const l of linksRef.current) {
+      // --- London Tube Lines: tethers styled as iconic underground tracks ---
+      const tubeLineColors = ["#e32017", "#003688", "#00782a", "#ffd300", "#6950a1", "#0098d4", "#b36305"];
+
+      for (let idx = 0; idx < linksRef.current.length; idx++) {
+        const l = linksRef.current[idx]!;
         const a = l.source as Node;
         const b = l.target as Node;
         if (a.x == null || b.x == null || a.y == null || b.y == null) continue;
         const lit =
           hover === a.id || hover === b.id ||
           (active !== null && (a.id.toLowerCase() === active || b.id.toLowerCase() === active));
-        // Hovering a body pushes everything it isn't tied to into the background,
-        // so one topic's connections can actually be read out of the tangle.
         const muted = hover !== null && !lit;
 
-        // Bow each tether so crossing pairs stay legible instead of overlapping.
+        // Tube track line
         const mx = (a.px + b.px) / 2;
         const my = (a.py + b.py) / 2;
         const dx = b.px - a.px;
         const dy = b.py - a.py;
         const len = Math.hypot(dx, dy) || 1;
-        const cx = mx + (-dy / len) * len * 0.12;
-        const cy = my + (dx / len) * len * 0.12;
+        const cx = mx + (-dy / len) * len * 0.08;
+        const cy = my + (dx / len) * len * 0.08;
 
-        const grad = ctx.createLinearGradient(a.px, a.py, b.px, b.py);
-        grad.addColorStop(0, tint(a, 1));
-        grad.addColorStop(1, tint(b, 1));
-        ctx.strokeStyle = grad;
-        // Floor raised from 0.12: the tethers are the whole point of the map and
-        // were nearly invisible at low weights.
-        ctx.globalAlpha = muted ? 0.07 : lit ? 0.95 : Math.min(0.6, 0.28 + l.weight * 0.06);
-        ctx.lineWidth = Math.min(6, 1.2 + l.weight * 0.8);
+        const lineColor = tubeLineColors[idx % tubeLineColors.length]!;
+        ctx.strokeStyle = lineColor;
+        ctx.globalAlpha = muted ? 0.12 : lit ? 1 : Math.min(0.75, 0.45 + l.weight * 0.08);
+        ctx.lineWidth = lit ? 4.5 : Math.min(4, 2.2 + l.weight * 0.6);
         ctx.lineCap = "round";
         ctx.beginPath();
         ctx.moveTo(a.px, a.py);
         ctx.quadraticCurveTo(cx, cy, b.px, b.py);
         ctx.stroke();
 
-        // Motes drifting along the tether — one per co-mention, so a heavily
-        // shared pair visibly courses with traffic.
+        // White London Tube Train Motes running along the track
         const motes = Math.min(4, l.weight);
         for (let i = 0; i < motes; i++) {
-          const t = ((now * 0.00016 + i / motes + len * 0.0007) % 1 + 1) % 1;
+          const t = ((now * 0.00018 + i / motes + len * 0.0008) % 1 + 1) % 1;
           const it = 1 - t;
           const mxp = it * it * a.px + 2 * it * t * cx + t * t * b.px;
           const myp = it * it * a.py + 2 * it * t * cy + t * t * b.py;
-          ctx.globalAlpha = (muted ? 0.12 : lit ? 0.95 : 0.6) * Math.sin(t * Math.PI);
-          ctx.fillStyle = tint(t < 0.5 ? a : b, 1);
+          ctx.globalAlpha = (muted ? 0.15 : lit ? 1 : 0.8) * Math.sin(t * Math.PI);
+          ctx.fillStyle = "#ffffff";
           ctx.beginPath();
-          ctx.arc(mxp, myp, lit ? 2.6 : 1.9, 0, Math.PI * 2);
+          ctx.arc(mxp, myp, lit ? 3 : 2.2, 0, Math.PI * 2);
           ctx.fill();
         }
       }
       ctx.globalAlpha = 1;
 
-      // --- bodies ---
-      // Biggest first so small bodies land on top and never hide behind a giant.
+      // --- London Station Interchange Discs ---
       for (const n of [...nodes].sort((p, q) => q.shown - p.shown)) {
         if (n.x == null || n.y == null) continue;
         const target = nodeRadius(n);
-        n.shown += (target - n.shown) * 0.12; // ease toward the new size
+        n.shown += (target - n.shown) * 0.12;
         const r = n.shown;
         if (r < 0.5) continue;
         const colour = tint(n, 1);
@@ -339,50 +334,40 @@ export function Constellation({ graph, filter, onToggle }: {
         const isHovered = hover === n.id;
         const linkedToHover = hover !== null && (isHovered || neighbours(hover).has(n.id));
         const dim =
-          (active !== null && !isActive ? 0.32 : 1) * (hover !== null && !linkedToHover ? 0.35 : 1);
+          (active !== null && !isActive ? 0.35 : 1) * (hover !== null && !linkedToHover ? 0.35 : 1);
 
-        // pulse ring on a fresh mention
+        // Pulse ring on fresh debate mention
         const age = now - n.pulseAt;
         if (age < PULSE_MS) {
           const p = age / PULSE_MS;
           ctx.beginPath();
-          ctx.arc(n.px, n.py, r + p * 34, 0, Math.PI * 2);
-          ctx.strokeStyle = colour;
-          ctx.globalAlpha = (1 - p) * 0.5 * dim;
-          ctx.lineWidth = 2;
+          ctx.arc(n.px, n.py, r + p * 32, 0, Math.PI * 2);
+          ctx.strokeStyle = "#e32017";
+          ctx.globalAlpha = (1 - p) * 0.6 * dim;
+          ctx.lineWidth = 2.5;
           ctx.stroke();
         }
 
-        // Glow, kept tight on faded topics — a wide halo on every body turned
-        // the middle of the map into an indistinct smear.
-        const glowR = r * (n.weak ? 1.7 : 2.4);
-        const glow = ctx.createRadialGradient(n.px, n.py, r * 0.2, n.px, n.py, glowR);
-        glow.addColorStop(0, tint(n, n.weak ? 0.3 : 0.55));
-        glow.addColorStop(1, tint(n, 0));
-        ctx.globalAlpha = (n.weak ? 0.22 : 0.7) * dim;
-        ctx.fillStyle = glow;
-        ctx.beginPath();
-        ctx.arc(n.px, n.py, glowR, 0, Math.PI * 2);
-        ctx.fill();
+        // Interchange Station Body (White enamel circle with solid ring)
+        ctx.globalAlpha = (n.weak ? 0.65 : 1) * dim;
 
-        // Core enamel disc
-        ctx.globalAlpha = (n.weak ? 0.6 : 1) * dim;
-        const body = ctx.createRadialGradient(
-          n.px - r * 0.3, n.py - r * 0.35, r * 0.05,
-          n.px, n.py, r,
-        );
-        body.addColorStop(0, tint(n, n.weak ? 0.6 : 1));
-        body.addColorStop(0.85, tint(n, n.weak ? 0.3 : 0.85));
-        body.addColorStop(1, tint(n, n.weak ? 0.2 : 0.7));
+        // Outer Station Ring
         ctx.beginPath();
         ctx.arc(n.px, n.py, r, 0, Math.PI * 2);
-        ctx.fillStyle = body;
+        ctx.fillStyle = "#ffffff";
         ctx.fill();
-        ctx.lineWidth = isActive ? 3.5 : isHovered ? 2.5 : 2;
-        ctx.strokeStyle = isActive ? accent : colour;
+        ctx.lineWidth = isActive ? 4 : isHovered ? 3.5 : 2.5;
+        ctx.strokeStyle = isActive ? "#1d4ed8" : "#111827";
         ctx.stroke();
 
-        // Label: inside the body only when it genuinely fits, otherwise beneath it with a backing pill.
+        // Inner Sentiment Core Badge
+        const innerR = Math.max(4, r * 0.68);
+        ctx.beginPath();
+        ctx.arc(n.px, n.py, innerR, 0, Math.PI * 2);
+        ctx.fillStyle = colour;
+        ctx.fill();
+
+        // Station Name Label
         ctx.globalAlpha = dim;
         ctx.font = labelFont(n, r);
         ctx.textAlign = "center";
@@ -390,88 +375,85 @@ export function Constellation({ graph, filter, onToggle }: {
         const text = labelOf(n, w);
         const textMetrics = ctx.measureText(text);
         const textW = textMetrics.width;
-        const inside = textW <= r * 1.55;
+        const inside = textW <= r * 1.35;
         const ty = inside ? n.py : n.py + r + 13;
 
         if (!inside) {
-          // Draw solid enamel pill behind outside label for guaranteed legibility over tethers
-          ctx.fillStyle = panel;
-          ctx.globalAlpha = 0.92 * dim;
-          roundRect(ctx, n.px - textW / 2 - 6, ty - 8, textW + 12, 16, 4);
+          // Enamel street/station pill backing
+          ctx.fillStyle = "#0f172a";
+          ctx.globalAlpha = 0.95 * dim;
+          roundRect(ctx, n.px - textW / 2 - 7, ty - 8, textW + 14, 17, 4);
           ctx.fill();
-          ctx.strokeStyle = line;
+          ctx.strokeStyle = "#38bdf8";
           ctx.lineWidth = 1;
-          roundRect(ctx, n.px - textW / 2 - 6, ty - 8, textW + 12, 16, 4);
+          roundRect(ctx, n.px - textW / 2 - 7, ty - 8, textW + 14, 17, 4);
           ctx.stroke();
           ctx.globalAlpha = dim;
         }
 
-        ctx.fillStyle = inside && !n.weak ? "#ffffff" : ink;
+        ctx.fillStyle = inside ? "#ffffff" : "#f8fafc";
         ctx.fillText(text, n.px, ty);
 
-        // voices count tucked neatly under
-        ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
+        // Voice count underneath
+        ctx.font = "700 10px ui-sans-serif, system-ui, sans-serif";
         ctx.fillStyle = faint;
         const vy = inside ? n.py + r + 12 : ty + 15;
         const voices = `${n.voices} ${n.voices === 1 ? "voice" : "voices"}`;
         ctx.fillText(voices, n.px, vy);
 
-        // On hover, which broadcast the argument belongs to
+        // Hover tooltip
         const during = n.onAir?.[0];
         if (isHovered && during) {
           const max = canvasWidthChars(w);
           const title = during.title.length > max ? `${during.title.slice(0, max - 1).trimEnd()}…` : during.title;
-          const line = `during ${title} · ${Math.round(during.share * 100)}%`;
+          const line = `BROADCAST: ${title} (${Math.round(during.share * 100)}%)`;
           const cy = vy + 18 > h ? Math.max(12, n.py - r - 14) : vy + 14;
           const lineMetrics = ctx.measureText(line);
-          ctx.fillStyle = panel;
-          ctx.globalAlpha = 0.95;
-          roundRect(ctx, n.px - lineMetrics.width / 2 - 6, cy - 8, lineMetrics.width + 12, 16, 4);
+          ctx.fillStyle = "#111827";
+          ctx.globalAlpha = 0.96;
+          roundRect(ctx, n.px - lineMetrics.width / 2 - 8, cy - 9, lineMetrics.width + 16, 18, 5);
           ctx.fill();
-          ctx.strokeStyle = line;
-          ctx.lineWidth = 1;
-          roundRect(ctx, n.px - lineMetrics.width / 2 - 6, cy - 8, lineMetrics.width + 12, 16, 4);
+          ctx.strokeStyle = "#e32017";
+          ctx.lineWidth = 1.5;
+          roundRect(ctx, n.px - lineMetrics.width / 2 - 8, cy - 9, lineMetrics.width + 16, 18, 5);
           ctx.stroke();
-          ctx.fillStyle = ink;
+          ctx.fillStyle = "#fef08a";
           ctx.fillText(line, n.px, cy);
         }
         ctx.globalAlpha = 1;
       }
 
-      // --- heat legend, so the colour means something without a caption ---
+      // --- London Tube Fare & Temperature Key ---
       if (nodes.length > 0) {
         const lx = 14;
         const ly = h - 20;
-        const lw = 104;
+        const lw = 110;
 
-        // Seat the scale on its own panel so it stays readable over whatever
-        // the simulation drifts behind it.
-        ctx.globalAlpha = 0.92;
+        ctx.globalAlpha = 0.94;
         ctx.fillStyle = panel;
-        roundRect(ctx, legend.x, legend.y, legend.w, legend.h, 8);
+        roundRect(ctx, legend.x, legend.y, legend.w + 10, legend.h, 8);
         ctx.fill();
         ctx.globalAlpha = 1;
-        ctx.strokeStyle = line;
-        ctx.lineWidth = 1;
-        roundRect(ctx, legend.x, legend.y, legend.w, legend.h, 8);
+        ctx.strokeStyle = "#e32017";
+        ctx.lineWidth = 1.5;
+        roundRect(ctx, legend.x, legend.y, legend.w + 10, legend.h, 8);
         ctx.stroke();
 
         const bar = ctx.createLinearGradient(lx, 0, lx + lw, 0);
-        bar.addColorStop(0, heat(-2.5));
-        bar.addColorStop(0.5, heat(0));
-        bar.addColorStop(1, heat(2.5));
+        bar.addColorStop(0, "#e32017"); // Central / Fuming
+        bar.addColorStop(0.5, "#ffd300"); // Circle / Divided
+        bar.addColorStop(1, "#00782a"); // District / Chuffed
         ctx.fillStyle = bar;
-        ctx.globalAlpha = 0.85;
-        roundRect(ctx, lx, ly, lw, 5, 2.5);
+        ctx.globalAlpha = 0.9;
+        roundRect(ctx, lx, ly, lw, 6, 3);
         ctx.fill();
         ctx.globalAlpha = 1;
-        ctx.font = "600 9px ui-sans-serif, system-ui, sans-serif";
+        ctx.font = "700 9.5px ui-sans-serif, system-ui, sans-serif";
         ctx.fillStyle = faint;
         ctx.textAlign = "left";
-        ctx.textBaseline = "alphabetic";
-        ctx.fillText("Fuming", lx, ly - 5);
+        ctx.fillText("🔴 Fuming", lx, ly - 5);
         ctx.textAlign = "right";
-        ctx.fillText("Chuffed", lx + lw, ly - 5);
+        ctx.fillText("🟢 Chuffed", lx + lw, ly - 5);
       }
     };
     raf = requestAnimationFrame(draw);
