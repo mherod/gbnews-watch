@@ -81,15 +81,17 @@ function initials(name: string): string {
   return (words[0]![0]! + (words[1]?.[0] ?? "")).toUpperCase();
 }
 
-function hue(name: string) {
-  let hash = 0;
-  for (const char of name) hash = (hash * 31 + char.codePointAt(0)!) % 360;
-  return hash;
+/** Regimental-tie catalogue — distinct correspondents, one heraldic family. */
+const SWATCHES = ["#012169", "#264fa3", "#3f5e8c", "#c8102e", "#93273a", "#00782a", "#2f6f73", "#5a5f6e"];
+
+function swatchOf(name: string): string {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
+  return SWATCHES[h % SWATCHES.length]!;
 }
 
 function avatarStyle(name: string) {
-  const h = hue(name);
-  return { background: `linear-gradient(140deg, hsl(${h} 62% 52%), hsl(${(h + 40) % 360} 58% 42%))` };
+  return { background: swatchOf(name) };
 }
 
 /** Compact, ticks-every-second relative time. */
@@ -600,7 +602,7 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm 
   // The reply rail is a ::before pseudo-element tinted by this variable, not a
   // real child — so it can never become a stray grid item and break the layout.
   const liStyle = isReply
-    ? ({ "--rail": `hsl(${hue(c.author)} 55% 50%)` } as CSSProperties)
+    ? ({ "--rail": swatchOf(c.author) } as CSSProperties)
     : undefined;
 
   return (
@@ -612,24 +614,31 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm 
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28, ease: "easeOut" }}
     >
+      {c.isTopComment && (
+        <div className="comment__stamp" aria-hidden="true">
+          <div className="stamp-seal">
+            <span className="stamp-crown">♛</span>
+            <span className="stamp-text">1st</span>
+          </div>
+        </div>
+      )}
       <div className="avatar" style={style} aria-hidden="true">
         {initials(c.author)}
       </div>
       <div className="comment__main">
         <div className="comment__head">
           <span className="comment__author">{c.author}</span>
-          <span className="postmark" title={`Dispatched from ${authorRegion(c.author)}`}>
-            📮 {authorRegion(c.author)}
+          <span className="postmark" title={`Franked in ${authorRegion(c.author)}`}>
+            {authorRegion(c.author)}
           </span>
           {c.chatty && (
             <span
               className="chatty"
-              title={`${c.chatty.count} dispatches in the last ${c.chatty.windowMin} min · regular contributor`}
+              title={`${c.chatty.count} dispatches in the last ${c.chatty.windowMin} min — rarely leaves the snug`}
             >
-              🫖 {c.chatty.count} in {c.chatty.windowMin}m · Regular
+              Regular
             </span>
           )}
-          {c.isTopComment && <span className="tag tag--top">★ Top Dispatch</span>}
           {c.isPinned && <span className="tag tag--pin">Pinned</span>}
           {c.isEdited && <span className="comment__edited">amended</span>}
           <time className="comment__time" dateTime={new Date(c.timeMs).toISOString()} title={absoluteTime(c.timeMs)}>
@@ -666,16 +675,16 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm 
         <div className="comment__foot">
           <span
             className="stat stat--like"
-            title={`${c.likes} listeners said "Hear, hear!"`}
+            title={`${c.likes} in the gallery cried "Hear, hear!"`}
           >
-            🇬🇧 Hear, hear! {c.likes > 0 && <b>{c.likes}</b>}
+            Hear, hear! {c.likes > 0 && <b>{c.likes}</b>}
           </span>
           {c.dislikes > 0 && (
             <span
               className="stat stat--rubbish"
               title={`${c.dislikes} listeners called rubbish`}
             >
-              🗞️ Tosh {c.dislikes}
+              Tosh {c.dislikes}
             </span>
           )}
           {!isReply && c.replies > 0 && (
@@ -842,7 +851,7 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
   const allWeak = trends.length > 0 && trends.every((t) => t.weak);
   return (
     <div className="trends" aria-label="Trending words">
-      <span className="trends__label">🔥 Fleet Street Wire</span>
+      <span className="trends__label">Fleet Street Wire</span>
       {allWeak && <span className="trends__quiet" title="No topic has caught on with more than one person yet">· quiet in the chamber</span>}
       <div className="trends__chips" ref={wireFades}>
         {trends.map((t) => {
@@ -928,25 +937,25 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
             Have Your Say
           </h1>
           <p>
-            The Great British Public Forum & Live Broadcast ·{" "}
+            Incorporating The Great British Public Forum · Est. this morning ·{" "}
             <a href="https://www.gbnews.com/watch/live" target="_blank" rel="noreferrer">
               gbnews.com/watch/live
             </a>
           </p>
         </div>
         <div className="meters">
-          <span className={statusClass}>
-            <span className="status__dot" />
-            {statusText}
-          </span>
+          {(!connected || stats.upstream !== "live") && (
+            <span className={statusClass}>
+              <span className="status__dot" />
+              {statusText}
+            </span>
+          )}
           {mood && (
             <span
               className={`mood mood--${mood.tone}`}
-              title={`Room mood over ${mood.count} recent comments — ${Math.round(mood.negFrac * 100)}% negative, ${Math.round(mood.posFrac * 100)}% positive`}
+              title={`Room mood over ${mood.count} recent comments — ${Math.round(mood.negFrac * 100)}% negative, ${Math.round(mood.posFrac * 100)}% positive${mood.detail ? ` · ${mood.detail}` : ""}`}
             >
-              <span className="mood__emoji">{mood.emoji}</span>
               {mood.label}
-              {mood.detail && <span className="mood__detail">{mood.detail}</span>}
             </span>
           )}
           {stats.clients > 0 && <StatTile value={stats.clients} label="in the gallery" className="meter--accent" />}
@@ -955,7 +964,7 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
               <b>{stats.perMinute}</b>
               <Sparkline arrivals={arrivals} now={now} />
             </div>
-            <span>per min{peak > 0 ? ` · peak ${peak}` : ""}</span>
+            <span title={peak > 0 ? `peak ${peak} per min` : undefined}>per min</span>
           </div>
           <StatTile value={stats.total} label="dispatches" />
         </div>
@@ -1049,7 +1058,7 @@ function App() {
     () => roomMood(comments, Date.now(), { windowMs: 300_000, minScored: 4 }),
     [comments],
   );
-  const emoji = useMemo(() => topEmoji(comments, Date.now(), { limit: 5 }), [comments]);
+  const emoji = useMemo(() => topEmoji(comments, Date.now(), { limit: 3 }), [comments]);
   const [showRoom, setShowRoom] = useState(true);
 
   // Unlike a rolling window the memory is never rebuilt: each new comment
@@ -1176,8 +1185,8 @@ function App() {
           <section className={`room-panel${showRoom ? "" : " room-panel--closed"}`}>
             <div className="room-panel__bar">
               <h2 className="room-panel__title">
-                🍺 The Taproom
-                <span>Pint-side politics in real time · topics argued over a pint are tethered · colour = room temperature</span>
+                The Taproom
+                <span>Tonight's arguments, mapped · argued together = tethered</span>
               </h2>
               <button
                 type="button"
@@ -1212,7 +1221,7 @@ function App() {
               <i />
               <i />
             </div>
-            <p>Waiting for the next dispatch from the realm…</p>
+            <p>Holding the front page…</p>
           </div>
         ) : (
           <>

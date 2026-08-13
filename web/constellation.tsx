@@ -48,12 +48,20 @@ interface Node extends SimulationNodeDatum {
 
 type Link = SimulationLinkDatum<Node> & { weight: number };
 
-/** Heat scale: angry red → neutral amber → warm green. */
+/** Heat scale: Central-line red (fuming) → slate → District green (chuffed). */
 const heat = scaleLinear<string>()
-  .domain([-2.5, 0, 2.5])
-  .range(["#ef4444", "#f59e0b", "#22c55e"])
+  .domain([-1.6, 0, 1.6])
+  .range(["#C8102E", "#94A3B8", "#00782A"])
   .interpolate(interpolateRgb)
   .clamp(true);
+
+/**
+ * The board is a fixed dark stage in both themes — it never reads the page's
+ * theme variables, so its own mini-palette lives here.
+ */
+const CANVAS_FONT = '"Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif';
+const BOARD_INK = "#F8FAFC";
+const BOARD_PILL = "rgba(10, 23, 51, 0.92)";
 
 /**
  * Size tracks how much a topic is dominating — its accumulated, decayed weight —
@@ -176,16 +184,6 @@ export function Constellation({ graph, filter, onToggle }: {
       sim.alpha(0.9);
     }
 
-    const styles = getComputedStyle(document.documentElement);
-    const readVar = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback;
-    let ink = readVar("--ink", "#e7ecf3");
-    let faint = readVar("--ink-faint", "#8b95a4");
-    let accent = readVar("--accent", "#7d9cff");
-    let panel = readVar("--panel", "#161b22");
-    let line = readVar("--line", "#262d38");
-    // Labels are stroked in the page background so they stay readable wherever
-    // they land — over a glow, a tether, or another body's halo.
-    let halo = readVar("--bg", "#0e1116");
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const resize = () => {
@@ -205,18 +203,6 @@ export function Constellation({ graph, filter, onToggle }: {
     const ro = new ResizeObserver(resize);
     ro.observe(wrap);
     resize();
-
-    const themeQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    const onTheme = () => {
-      const s = getComputedStyle(document.documentElement);
-      ink = s.getPropertyValue("--ink").trim() || ink;
-      faint = s.getPropertyValue("--ink-faint").trim() || faint;
-      accent = s.getPropertyValue("--accent").trim() || accent;
-      panel = s.getPropertyValue("--panel").trim() || panel;
-      line = s.getPropertyValue("--line").trim() || line;
-      halo = s.getPropertyValue("--bg").trim() || halo;
-    };
-    themeQuery.addEventListener("change", onTheme);
 
     let raf = 0;
     const draw = () => {
@@ -245,38 +231,36 @@ export function Constellation({ graph, filter, onToggle }: {
         return (neighbourCache = set);
       };
 
-      // The legend's footprint. Bodies are kept out of it so the scale is never
-      // buried under a node, as it was under "Mike Parry".
-      const legend = { x: 12, y: h - 40, w: 122, h: 28 };
-
       // Keep every body — and its label, which is centred on the node and is
       // often wider than the circle — inside the canvas. Clamping to the radius
       // alone still left names like "pull factors" clipped at a phone width.
+      // The extra bottom margin clears the label pill drawn below each disc.
       for (const n of nodes) {
         if (n.x == null || n.y == null) continue;
         const r = nodeRadius(n) + 4;
         ctx.font = labelFont(n, r);
-        const halfLabel = ctx.measureText(labelOf(n, w)).width / 2 + 4;
+        // Pill extends half the text plus 7px padding; wobble adds ~1.2px.
+        const halfLabel = ctx.measureText(labelOf(n, w)).width / 2 + 9;
         const padX = Math.min(Math.max(r, halfLabel), w / 2);
         n.x = Math.min(Math.max(n.x, padX), Math.max(padX, w - padX));
-        n.y = Math.min(Math.max(n.y, r), Math.max(r, h - r - 16));
+        n.y = Math.min(Math.max(n.y, r), Math.max(r, h - r - 30));
 
-        if (n.x - r < legend.x + legend.w && n.y + r > legend.y) {
-          n.y = Math.max(r, legend.y - r - 6);
+        // Keep label pills clear of the HTML legend's bottom-left footprint
+        // (gradient swatch + "Fuming → Chuffed" runs ~205px wide).
+        if (n.x - halfLabel < 215 && n.y + r + 21.5 > h - 29) {
+          n.y = Math.max(r, h - 29 - 21.5 - r);
         }
 
         // A slow, tiny orbit so the map breathes instead of sitting frozen
         // between simulation ticks. Purely visual — the physics never sees it.
-        const wobble = reduceMotion ? 0 : 2.4;
+        const wobble = reduceMotion ? 0 : 1.2;
         n.px = n.x + Math.sin(now * 0.00042 + n.drift) * wobble;
         n.py = n.y + Math.cos(now * 0.00037 + n.drift * 1.7) * wobble;
       }
       const active = filterRef.current?.toLowerCase() ?? null;
       const hover = hoverRef.current;
 
-      // --- London Tube Lines: tethers styled as iconic underground tracks ---
-      const tubeLineColors = ["#e32017", "#003688", "#00782a", "#ffd300", "#6950a1", "#0098d4", "#b36305"];
-
+      // --- Tethers: quiet chalk lines that light Central-line red when lit ---
       for (let idx = 0; idx < linksRef.current.length; idx++) {
         const l = linksRef.current[idx]!;
         const a = l.source as Node;
@@ -296,27 +280,25 @@ export function Constellation({ graph, filter, onToggle }: {
         const cx = mx + (-dy / len) * len * 0.08;
         const cy = my + (dx / len) * len * 0.08;
 
-        const lineColor = tubeLineColors[idx % tubeLineColors.length]!;
-        ctx.strokeStyle = lineColor;
-        ctx.globalAlpha = muted ? 0.12 : lit ? 1 : Math.min(0.75, 0.45 + l.weight * 0.08);
-        ctx.lineWidth = lit ? 4.5 : Math.min(4, 2.2 + l.weight * 0.6);
+        ctx.strokeStyle = lit ? "#C8102E" : "rgba(255, 255, 255, 0.16)";
+        ctx.globalAlpha = muted ? 0.06 : lit ? 0.9 : 1;
+        ctx.lineWidth = lit ? 3 : Math.min(3, 1.2 + l.weight * 0.5);
         ctx.lineCap = "round";
         ctx.beginPath();
         ctx.moveTo(a.px, a.py);
         ctx.quadraticCurveTo(cx, cy, b.px, b.py);
         ctx.stroke();
 
-        // White London Tube Train Motes running along the track
-        const motes = Math.min(4, l.weight);
-        for (let i = 0; i < motes; i++) {
-          const t = ((now * 0.00018 + i / motes + len * 0.0008) % 1 + 1) % 1;
+        // One lone train, only on the tether you point at — the drier gag.
+        if (lit) {
+          const t = ((now * 0.00018 + len * 0.0008) % 1 + 1) % 1;
           const it = 1 - t;
           const mxp = it * it * a.px + 2 * it * t * cx + t * t * b.px;
           const myp = it * it * a.py + 2 * it * t * cy + t * t * b.py;
-          ctx.globalAlpha = (muted ? 0.15 : lit ? 1 : 0.8) * Math.sin(t * Math.PI);
-          ctx.fillStyle = "#ffffff";
+          ctx.globalAlpha = 0.9 * Math.sin(t * Math.PI);
+          ctx.fillStyle = "#FFFFFF";
           ctx.beginPath();
-          ctx.arc(mxp, myp, lit ? 3 : 2.2, 0, Math.PI * 2);
+          ctx.arc(mxp, myp, 2.5, 0, Math.PI * 2);
           ctx.fill();
         }
       }
@@ -336,124 +318,72 @@ export function Constellation({ graph, filter, onToggle }: {
         const dim =
           (active !== null && !isActive ? 0.35 : 1) * (hover !== null && !linkedToHover ? 0.35 : 1);
 
-        // Pulse ring on fresh debate mention
+        // Pulse ring on fresh debate mention — a ripple, not a fire alarm.
         const age = now - n.pulseAt;
         if (age < PULSE_MS) {
           const p = age / PULSE_MS;
           ctx.beginPath();
-          ctx.arc(n.px, n.py, r + p * 32, 0, Math.PI * 2);
-          ctx.strokeStyle = "#e32017";
-          ctx.globalAlpha = (1 - p) * 0.6 * dim;
-          ctx.lineWidth = 2.5;
+          ctx.arc(n.px, n.py, r + p * 14, 0, Math.PI * 2);
+          ctx.strokeStyle = "#C8102E";
+          ctx.globalAlpha = (1 - p) * 0.35 * dim;
+          ctx.lineWidth = 1.5;
           ctx.stroke();
         }
 
-        // Interchange Station Body (White enamel circle with solid ring)
+        // Solid heat-tinted disc with a thin white ring — the roundel
+        // silhouette with legible temperature.
         ctx.globalAlpha = (n.weak ? 0.65 : 1) * dim;
-
-        // Outer Station Ring
         ctx.beginPath();
         ctx.arc(n.px, n.py, r, 0, Math.PI * 2);
-        ctx.fillStyle = "#ffffff";
-        ctx.fill();
-        ctx.lineWidth = isActive ? 4 : isHovered ? 3.5 : 2.5;
-        ctx.strokeStyle = isActive ? "#1d4ed8" : "#111827";
-        ctx.stroke();
-
-        // Inner Sentiment Core Badge
-        const innerR = Math.max(4, r * 0.68);
-        ctx.beginPath();
-        ctx.arc(n.px, n.py, innerR, 0, Math.PI * 2);
         ctx.fillStyle = colour;
         ctx.fill();
+        ctx.lineWidth = isActive ? 3 : 2;
+        ctx.strokeStyle = isActive || isHovered ? "#C8102E" : `rgba(255, 255, 255, ${n.weak ? 0.4 : 0.85})`;
+        ctx.stroke();
 
-        // Station Name Label
+        // Station-name pill below the disc, count folded in.
         ctx.globalAlpha = dim;
         ctx.font = labelFont(n, r);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         const text = labelOf(n, w);
-        const textMetrics = ctx.measureText(text);
-        const textW = textMetrics.width;
-        const inside = textW <= r * 1.35;
-        const ty = inside ? n.py : n.py + r + 13;
+        const textW = ctx.measureText(text).width;
+        const ty = n.py + r + 13;
 
-        if (!inside) {
-          // Enamel street/station pill backing
-          ctx.fillStyle = "#0f172a";
-          ctx.globalAlpha = 0.95 * dim;
-          roundRect(ctx, n.px - textW / 2 - 7, ty - 8, textW + 14, 17, 4);
-          ctx.fill();
-          ctx.strokeStyle = "#38bdf8";
-          ctx.lineWidth = 1;
-          roundRect(ctx, n.px - textW / 2 - 7, ty - 8, textW + 14, 17, 4);
-          ctx.stroke();
-          ctx.globalAlpha = dim;
-        }
+        ctx.fillStyle = BOARD_PILL;
+        ctx.globalAlpha = 0.92 * dim;
+        roundRect(ctx, n.px - textW / 2 - 7, ty - 8, textW + 14, 17, 4);
+        ctx.fill();
+        ctx.strokeStyle = isActive ? "#C8102E" : "rgba(255, 255, 255, 0.18)";
+        ctx.lineWidth = 1;
+        roundRect(ctx, n.px - textW / 2 - 7, ty - 8, textW + 14, 17, 4);
+        ctx.stroke();
+        ctx.globalAlpha = dim;
 
-        ctx.fillStyle = inside ? "#ffffff" : "#f8fafc";
+        ctx.fillStyle = BOARD_INK;
         ctx.fillText(text, n.px, ty);
 
-        // Voice count underneath
-        ctx.font = "700 10px ui-sans-serif, system-ui, sans-serif";
-        ctx.fillStyle = faint;
-        const vy = inside ? n.py + r + 12 : ty + 15;
-        const voices = `${n.voices} ${n.voices === 1 ? "voice" : "voices"}`;
-        ctx.fillText(voices, n.px, vy);
-
-        // Hover tooltip
+        // Hover tooltip — a news-channel lower third, white on navy.
         const during = n.onAir?.[0];
         if (isHovered && during) {
           const max = canvasWidthChars(w);
           const title = during.title.length > max ? `${during.title.slice(0, max - 1).trimEnd()}…` : during.title;
-          const line = `BROADCAST: ${title} (${Math.round(during.share * 100)}%)`;
-          const cy = vy + 18 > h ? Math.max(12, n.py - r - 14) : vy + 14;
+          const line = `As heard on: ${title} (${Math.round(during.share * 100)}%)`;
+          const cy = ty + 26 > h ? Math.max(12, n.py - r - 14) : ty + 22;
+          ctx.font = `600 11px ${CANVAS_FONT}`;
           const lineMetrics = ctx.measureText(line);
-          ctx.fillStyle = "#111827";
+          ctx.fillStyle = "#012169";
           ctx.globalAlpha = 0.96;
           roundRect(ctx, n.px - lineMetrics.width / 2 - 8, cy - 9, lineMetrics.width + 16, 18, 5);
           ctx.fill();
-          ctx.strokeStyle = "#e32017";
+          ctx.strokeStyle = "#C8102E";
           ctx.lineWidth = 1.5;
           roundRect(ctx, n.px - lineMetrics.width / 2 - 8, cy - 9, lineMetrics.width + 16, 18, 5);
           ctx.stroke();
-          ctx.fillStyle = "#fef08a";
+          ctx.fillStyle = "#FFFFFF";
           ctx.fillText(line, n.px, cy);
         }
         ctx.globalAlpha = 1;
-      }
-
-      // --- London Tube Fare & Temperature Key ---
-      if (nodes.length > 0) {
-        const lx = 14;
-        const ly = h - 20;
-        const lw = 110;
-
-        ctx.globalAlpha = 0.94;
-        ctx.fillStyle = panel;
-        roundRect(ctx, legend.x, legend.y, legend.w + 10, legend.h, 8);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = "#e32017";
-        ctx.lineWidth = 1.5;
-        roundRect(ctx, legend.x, legend.y, legend.w + 10, legend.h, 8);
-        ctx.stroke();
-
-        const bar = ctx.createLinearGradient(lx, 0, lx + lw, 0);
-        bar.addColorStop(0, "#e32017"); // Central / Fuming
-        bar.addColorStop(0.5, "#ffd300"); // Circle / Divided
-        bar.addColorStop(1, "#00782a"); // District / Chuffed
-        ctx.fillStyle = bar;
-        ctx.globalAlpha = 0.9;
-        roundRect(ctx, lx, ly, lw, 6, 3);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.font = "700 9.5px ui-sans-serif, system-ui, sans-serif";
-        ctx.fillStyle = faint;
-        ctx.textAlign = "left";
-        ctx.fillText("🔴 Fuming", lx, ly - 5);
-        ctx.textAlign = "right";
-        ctx.fillText("🟢 Chuffed", lx + lw, ly - 5);
       }
     };
     raf = requestAnimationFrame(draw);
@@ -491,7 +421,6 @@ export function Constellation({ graph, filter, onToggle }: {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      themeQuery.removeEventListener("change", onTheme);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerdown", onClick);
       canvas.removeEventListener("pointerleave", onLeave);
@@ -518,6 +447,10 @@ export function Constellation({ graph, filter, onToggle }: {
         role="img"
         aria-label={canvasLabel}
       />
+      <div className="room__legend" aria-hidden="true">
+        <i />
+        Fuming → Chuffed
+      </div>
       <ul className="room__topics-list" aria-label="Room topics">
         {graph.nodes.map((node) => {
           const active = filter?.toLowerCase() === node.label.toLowerCase();
@@ -543,7 +476,7 @@ export function Constellation({ graph, filter, onToggle }: {
 
 /** The font a node's label is drawn in — shared by measuring and rendering. */
 function labelFont(n: Node, r: number): string {
-  return `${n.weak ? 500 : 650} ${Math.max(11, Math.min(15, r * 0.42))}px ui-sans-serif, system-ui, sans-serif`;
+  return `${n.weak ? 500 : 600} ${Math.max(11, Math.min(15, r * 0.42))}px ${CANVAS_FONT}`;
 }
 
 /** How many characters a caption can afford at this canvas width. */
@@ -552,13 +485,14 @@ function canvasWidthChars(canvasWidth: number): number {
 }
 
 /**
- * A node's label, shortened when the canvas is too narrow to hold it. Long
- * topics ("stop the boats", "pull factors") otherwise run past both edges on a
- * phone no matter where the body itself is clamped.
+ * A node's label pill text: the topic (shortened when the canvas is too narrow
+ * to hold it — long topics like "stop the boats" otherwise run past both edges
+ * on a phone) with the voice count folded in after an interpunct.
  */
 function labelOf(n: Node, canvasWidth: number): string {
   const max = canvasWidthChars(canvasWidth);
-  return n.label.length > max ? `${n.label.slice(0, max - 1).trimEnd()}…` : n.label;
+  const label = n.label.length > max ? `${n.label.slice(0, max - 1).trimEnd()}…` : n.label;
+  return `${label} · ${n.voices}`;
 }
 
 /** Rounded rect that works without relying on the newer ctx.roundRect. */
