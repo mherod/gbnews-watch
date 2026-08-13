@@ -458,9 +458,9 @@ export function Constellation({ graph, filter, onToggle }: {
         ctx.fillStyle = faint;
         ctx.textAlign = "left";
         ctx.textBaseline = "alphabetic";
-        ctx.fillText("angry", lx, ly - 5);
+        ctx.fillText("Fuming", lx, ly - 5);
         ctx.textAlign = "right";
-        ctx.fillText("warm", lx + lw, ly - 5);
+        ctx.fillText("Chuffed", lx + lw, ly - 5);
       }
     };
     raf = requestAnimationFrame(draw);
@@ -479,7 +479,7 @@ export function Constellation({ graph, filter, onToggle }: {
     };
     const onMove = (ev: PointerEvent) => {
       const hit = pick(ev);
-      hoverRef.current = hit?.id ?? null;
+      hoverRef.current = hit ? hit.id : null;
       canvas.style.cursor = hit ? "pointer" : "default";
     };
     const onClick = (ev: PointerEvent) => {
@@ -491,9 +491,9 @@ export function Constellation({ graph, filter, onToggle }: {
     const onLeave = () => {
       hoverRef.current = null;
     };
-    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointermove", onMove, { passive: true });
     canvas.addEventListener("pointerdown", onClick);
-    canvas.addEventListener("pointerleave", onLeave);
+    canvas.addEventListener("pointerleave", onLeave, { passive: true });
 
     return () => {
       cancelAnimationFrame(raf);
@@ -514,8 +514,8 @@ export function Constellation({ graph, filter, onToggle }: {
   }, [graph.nodes]);
 
   const canvasLabel = graph.nodes.length === 0
-    ? "The Room: listening for topics being argued about"
-    : `${graph.nodes.length} topic${graph.nodes.length === 1 ? "" : "s"} being argued about${topNode ? `; strongest: ${topNode.label}` : ""}`;
+    ? "The Taproom: listening for topics being debated across the realm"
+    : `${graph.nodes.length} topic${graph.nodes.length === 1 ? "" : "s"} being debated${topNode ? `; strongest: ${topNode.label}` : ""}`;
 
   return (
     <div className="room" ref={wrapRef}>
@@ -543,7 +543,7 @@ export function Constellation({ graph, filter, onToggle }: {
           );
         })}
       </ul>
-      {!hasData && <p className="room__empty">Listening for topics to argue about…</p>}
+      {!hasData && <p className="room__empty">Listening for topics being debated in the room…</p>}
     </div>
   );
 }

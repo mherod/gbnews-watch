@@ -628,14 +628,14 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm 
           {c.chatty && (
             <span
               className="chatty"
-              title={`${c.chatty.count} messages in the last ${c.chatty.windowMin} min`}
+              title={`${c.chatty.count} dispatches in the last ${c.chatty.windowMin} min · regular contributor`}
             >
-              🗣 {c.chatty.count} in {c.chatty.windowMin}m
+              🫖 {c.chatty.count} in {c.chatty.windowMin}m · Regular
             </span>
           )}
-          {c.isTopComment && <span className="tag tag--top">★ Top</span>}
+          {c.isTopComment && <span className="tag tag--top">★ Top Dispatch</span>}
           {c.isPinned && <span className="tag tag--pin">Pinned</span>}
-          {c.isEdited && <span className="comment__edited">edited</span>}
+          {c.isEdited && <span className="comment__edited">amended</span>}
           <time className="comment__time" dateTime={new Date(c.timeMs).toISOString()} title={absoluteTime(c.timeMs)}>
             {c.timeLabel}
           </time>
@@ -668,11 +668,25 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm 
         />
 
         <div className="comment__foot">
-          {c.likes > 0 && <span className="stat stat--like">♥ {c.likes}</span>}
-          {c.dislikes > 0 && <span className="stat">✕ {c.dislikes}</span>}
+          {c.likes > 0 && (
+            <span
+              className="stat stat--like"
+              title={`${c.likes} ${c.likes === 1 ? "listener" : "listeners"} said "Hear, hear!"`}
+            >
+              ♥ {c.likes}
+            </span>
+          )}
+          {c.dislikes > 0 && (
+            <span
+              className="stat"
+              title={`${c.dislikes} ${c.dislikes === 1 ? "listener" : "listeners"} called rubbish`}
+            >
+              ✕ {c.dislikes}
+            </span>
+          )}
           {!isReply && c.replies > 0 && (
             <span className="stat stat--replies">
-              {c.replies} {c.replies === 1 ? "reply" : "replies"}
+              {c.replies} {c.replies === 1 ? "rebuttal" : "rebuttals"}
             </span>
           )}
         </div>
@@ -834,8 +848,8 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
   const allWeak = trends.length > 0 && trends.every((t) => t.weak);
   return (
     <div className="trends" aria-label="Trending words">
-      <span className="trends__label">🔥 Trending</span>
-      {allWeak && <span className="trends__quiet" title="No topic has caught on with more than one person yet">· quiet</span>}
+      <span className="trends__label">🔥 On The Wire</span>
+      {allWeak && <span className="trends__quiet" title="No topic has caught on with more than one person yet">· quiet in the chamber</span>}
       <div className="trends__chips" ref={wireFades}>
         {trends.map((t) => {
           const active = filter?.toLowerCase() === t.word.toLowerCase();
@@ -938,7 +952,7 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
               {mood.detail && <span className="mood__detail">{mood.detail}</span>}
             </span>
           )}
-          {stats.clients > 0 && <StatTile value={stats.clients} label="watching" className="meter--accent" />}
+          {stats.clients > 0 && <StatTile value={stats.clients} label="in the gallery" className="meter--accent" />}
           <div className="meter meter--rate">
             <div className="meter__rateline">
               <b>{stats.perMinute}</b>
@@ -946,7 +960,7 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
             </div>
             <span>per min{peak > 0 ? ` · peak ${peak}` : ""}</span>
           </div>
-          <StatTile value={stats.total} label="session" />
+          <StatTile value={stats.total} label="dispatches" />
         </div>
       </div>
       <OnAir programme={onAir} />
@@ -1164,17 +1178,17 @@ function App() {
           <section className={`room-panel${showRoom ? "" : " room-panel--closed"}`}>
             <div className="room-panel__bar">
               <h2 className="room-panel__title">
-                The Room
-                <span>learned over time · tethered when argued in one breath · size = how much it dominates · colour = mood</span>
+                The Taproom
+                <span>the national debate in real time · tethered when argued over a pint · size = volume of chatter · colour = temperature of the room</span>
               </h2>
               <button
                 type="button"
                 className="room-panel__toggle"
                 aria-expanded={showRoom}
-                title={showRoom ? "Hide topic constellation map" : "Show topic constellation map"}
+                title={showRoom ? "Hide taproom debate map" : "Show taproom debate map"}
                 onClick={() => setShowRoom((v) => !v)}
               >
-                {showRoom ? "Hide map" : "Show map"}
+                {showRoom ? "Hide taproom" : "Show taproom"}
               </button>
             </div>
             {showRoom && <Constellation graph={graph} filter={filter} onToggle={toggleFilter} />}
@@ -1189,14 +1203,14 @@ function App() {
               <i />
               <i />
             </div>
-            <p>Waiting for the next comment…</p>
+            <p>Waiting for the next dispatch from the realm…</p>
           </div>
         ) : (
           <>
             {filter ? (
               <p className="feed__meta feed__meta--filter">
                 <span>
-                  Filtering <b>“{filter}”</b> · {filtered.length} {filtered.length === 1 ? "match" : "matches"}
+                  Filtering <b>“{filter}”</b> · {filtered.length} {filtered.length === 1 ? "dispatch" : "dispatches"}
                 </span>
                 <button
                   type="button"
@@ -1211,14 +1225,14 @@ function App() {
             ) : (
               replyShare > 0 && (
                 <p className="feed__meta">
-                  {comments.length} recent · {replyShare}% replies
+                  {comments.length} dispatches · {replyShare}% rebuttals
                 </p>
               )
             )}
             {filtered.length === 0 ? (
               <div className="waiting">
                 <p>
-                  No comments mention “{filter}” in the last few minutes. It may scroll past as new ones arrive.
+                  No dispatches mention “{filter}” in the recent debate. It may crop up as the room gets going.
                 </p>
               </div>
             ) : (

@@ -16,6 +16,9 @@ export const LEXICON: Record<string, number> = {
   scared: -2, worried: -2, worry: -1, sad: -2, tragic: -3, tragedy: -3, mad: -2, betrayed: -3,
   betrayal: -3, coward: -2, weak: -2, incompetent: -3, unbelievable: -1, outrageous: -3, robbed: -2,
   criminal: -2, illegal: -1, invasion: -2, disgust: -3, contempt: -2, vile: -3, filth: -3, filthy: -3,
+  barmy: -2, bonkers: -2, bollocks: -3, shambles: -3, shambolic: -3, daft: -2, prat: -2, tosh: -2,
+  drivel: -2, codswallop: -2, muppet: -2, gutted: -2, miffed: -1, dodgy: -2, con: -2, swindle: -2,
+  twit: -2, bodge: -2, bodged: -2,
   // positive
   great: 2, love: 3, loved: 3, lovely: 2, brilliant: 3, excellent: 3, superb: 3, fantastic: 3,
   wonderful: 3, amazing: 3, awesome: 3, good: 1, agree: 2, agreed: 2, spot: 1, correct: 1,
@@ -23,7 +26,8 @@ export const LEXICON: Record<string, number> = {
   cheers: 1, well: 1, nice: 2, happy: 2, glad: 2, brave: 2, hero: 3, legend: 2, respect: 2,
   sensible: 2, fair: 1, honest: 2, truth: 1, wise: 2, funny: 2, congratulations: 3, welcome: 1,
   bravo: 3, genius: 3, perfect: 3, yes: 1, champion: 2, deserve: 1, deserved: 1, grateful: 2,
-  blessed: 2, smashing: 2, marvellous: 3, chuffed: 2, cracking: 2, solid: 1,
+  blessed: 2, smashing: 2, marvellous: 3, chuffed: 2, cracking: 2, solid: 1, proper: 1,
+  belter: 2, banger: 2, sound: 1, tidy: 1, ace: 2, splendid: 3, corker: 2,
   // more negative (common in these comments)
   outrage: -2, outraged: -2, shameless: -2, spineless: -2, clueless: -2, hopeless: -2, mess: -2,
   dreadful: -3, grim: -2, cruel: -2, brutal: -2, greedy: -2, liars: -2, cheat: -2, cheats: -2,
@@ -113,14 +117,14 @@ export function scoreText(text: string): number | null {
  */
 function classify(neg: number, pos: number): Pick<Mood, "label" | "emoji" | "tone" | "detail"> {
   const total = neg + pos;
-  if (total === 0) return { label: "Even", emoji: "😐", tone: "mixed" };
+  if (total === 0) return { label: "Fair Enough", emoji: "☕", tone: "mixed" };
   const nf = neg / total;
-  if (nf >= 0.72) return { label: "Heated", emoji: "😠", tone: "heated" };
-  if (nf >= 0.56) return { label: "Riled up", emoji: "😤", tone: "grumbly" };
-  if (nf <= 0.28) return { label: "Buzzing", emoji: "🤩", tone: "buzzing" };
-  if (nf <= 0.44) return { label: "Warm", emoji: "🙂", tone: "warm" };
+  if (nf >= 0.72) return { label: "Proper Fuming", emoji: "😡", tone: "heated" };
+  if (nf >= 0.56) return { label: "A Bit Miffed", emoji: "😤", tone: "grumbly" };
+  if (nf <= 0.28) return { label: "Proper Chuffed", emoji: "🎉", tone: "buzzing" };
+  if (nf <= 0.44) return { label: "Not Bad, Actually", emoji: "☕", tone: "warm" };
   const negPct = Math.round(nf * 100);
-  return { label: "Divided", emoji: "⚖️", tone: "mixed", detail: `${negPct}% 🔥 · ${100 - negPct}% 🙂` };
+  return { label: "Divided", emoji: "⚖️", tone: "mixed", detail: `${negPct}% 😤 · ${100 - negPct}% ☕` };
 }
 
 /** Reads the room by the balance of positive vs negative comments. */
