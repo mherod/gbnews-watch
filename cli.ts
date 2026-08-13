@@ -28,7 +28,7 @@ const { values } = parseArgs({
 if (values.help) {
   console.log(`gbnews-watch — stream GB News "Have Your Say" comments as they are posted
 
-Usage: bun run index.ts [options]
+Usage: bun run cli [options]
 
   --page <url>           Resolve the thread from a GB News article URL
   --container-id <id>    Resolve the thread from a vf:container_id value
