@@ -27,7 +27,6 @@ import {
   type TopicMemory,
 } from "../src/memory";
 import { Constellation } from "./constellation";
-import { AmbientBackdrop } from "./ambient-backdrop";
 import { UnionJack } from "./union-jack";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -1134,7 +1133,6 @@ function App() {
 
   return (
     <>
-      <AmbientBackdrop moodTone={mood?.tone} />
       <Header
         stats={stats}
         connected={connected}
