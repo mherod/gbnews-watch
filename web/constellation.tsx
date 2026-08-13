@@ -508,9 +508,41 @@ export function Constellation({ graph, filter, onToggle }: {
     // onToggle is stable (useCallback in App); the loop reads live data via refs.
   }, [onToggle]);
 
+  const topNode = useMemo(() => {
+    if (graph.nodes.length === 0) return null;
+    return [...graph.nodes].sort((a, b) => (b.voices || b.mentions) - (a.voices || a.mentions))[0];
+  }, [graph.nodes]);
+
+  const canvasLabel = graph.nodes.length === 0
+    ? "The Room: listening for topics being argued about"
+    : `${graph.nodes.length} topic${graph.nodes.length === 1 ? "" : "s"} being argued about${topNode ? `; strongest: ${topNode.label}` : ""}`;
+
   return (
     <div className="room" ref={wrapRef}>
-      <canvas ref={canvasRef} className="room__canvas" />
+      <canvas
+        ref={canvasRef}
+        className="room__canvas"
+        role="img"
+        aria-label={canvasLabel}
+      />
+      <ul className="room__topics-list" aria-label="Room topics">
+        {graph.nodes.map((node) => {
+          const active = filter?.toLowerCase() === node.label.toLowerCase();
+          return (
+            <li key={node.id}>
+              <button
+                type="button"
+                className="room__topic-btn"
+                onClick={() => onToggle(node.label)}
+                aria-pressed={active}
+                aria-label={node.weak ? `${node.label}, 1 voice` : `${node.label}, ${node.voices} ${node.voices === 1 ? "voice" : "voices"}`}
+              >
+                {node.label}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
       {!hasData && <p className="room__empty">Listening for topics to argue about…</p>}
     </div>
   );
