@@ -696,9 +696,20 @@ body {
 
 .room {
   position: relative;
-  /* dvh, not vh — vh ignores the iOS URL bar and clipped the canvas on load. */
-  height: clamp(220px, 42dvh, 460px);
+  /* dvh, not vh — vh ignores the iOS URL bar and clipped the canvas on load.
+     Height lives in a custom property so the narrow and reduced-motion
+     variants below can restate it without fighting over source order. */
+  --room-height: clamp(300px, 58dvh, 640px);
+  height: var(--room-height);
   border-top: 1px solid var(--line);
+}
+
+/* On a phone the header already owns the fold, so the map takes a smaller
+   slice of it — still roomier than it was, without burying the feed. */
+@media (max-width: 560px) {
+  .room {
+    --room-height: clamp(300px, 50dvh, 460px);
+  }
 }
 
 .room__canvas {
@@ -719,9 +730,11 @@ body {
   font-size: 13px;
 }
 
+/* Last, so it wins on any viewport: less canvas means less motion to sit
+   through when the reader has asked for less of it. */
 @media (prefers-reduced-motion: reduce) {
   .room {
-    height: clamp(220px, 34vh, 360px);
+    --room-height: clamp(280px, 42vh, 420px);
   }
 }
 
