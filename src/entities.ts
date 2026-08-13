@@ -175,6 +175,17 @@ export const ENTITIES: Entity[] = [
   },
   { canonical: "Martin Daubney", category: "other", aliases: [{ text: "martin daubney" }, caps("daubney")] },
   { canonical: "Beverley Turner", category: "other", aliases: [{ text: "beverley turner" }, { text: "bev turner" }] },
+
+  // ---- Politicians & room vocabulary harvested from the live feed ----
+  // (scripts/debug-sentiment-gaps.ts surfaced these fragmenting as bare
+  // first/last names; stable public figures, so safe to curate.)
+  { canonical: "Keir Starmer", category: "other", aliases: [{ text: "keir starmer" }, caps("starmer")] },
+  { canonical: "Kemi Badenoch", category: "other", aliases: [{ text: "kemi badenoch" }, caps("badenoch"), caps("kemi")] },
+  { canonical: "Andy Burnham", category: "other", aliases: [{ text: "andy burnham" }, caps("burnham")] },
+  { canonical: "Count Binface", category: "other", aliases: [{ text: "count binface" }, caps("binface")] },
+  // The room's name for Labour and the Tories being one party — a GB News-ism
+  // that trends as fragments ("uni party") without this merge.
+  { canonical: "Uniparty", category: "other", aliases: [{ text: "uniparty" }, { text: "uni party" }] },
 ];
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

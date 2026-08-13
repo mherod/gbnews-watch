@@ -101,6 +101,14 @@ test("ambiguous surnames only match through the full billed name", () => {
   expect(detect("Frost on the windscreen this morning")).toEqual([]);
 });
 
+test("harvested politicians and room vocabulary merge their fragments", () => {
+  expect(detect("Starmer waffling again")).toEqual(["Keir Starmer"]);
+  expect(detect("vote for Kemi")).toEqual(["Kemi Badenoch"]);
+  expect(detect("if Binface comes second")).toEqual(["Count Binface"]);
+  expect(detect("the uni party mud slings")).toEqual(["Uniparty"]);
+  expect(detect("typical uniparty stitch-up")).toEqual(["Uniparty"]);
+});
+
 test("registration is idempotent and never overwrites hand-curated entries", () => {
   const before = entityPattern("Tom Harwood");
   registerPresenterEntities(["Tom Harwood", "Tom Harwood"]);

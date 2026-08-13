@@ -131,17 +131,17 @@ test("the server learns one shared topic graph and serves it at /api/room", asyn
 
     const room = await (await fetch(`http://localhost:${server.port}/api/room`)).json();
     const ids = Object.keys(room.nodes);
-    expect(ids).toContain("burnham"); // the shared memory learned the topic
-    expect(room.nodes["burnham"].weight).toBeGreaterThan(3.9); // 4 mentions minus ms of decay
+    expect(ids).toContain("andy burnham"); // the shared memory learned the topic (entity-canonicalised)
+    expect(room.nodes["andy burnham"].weight).toBeGreaterThan(3.9); // 4 mentions minus ms of decay
     expect(room.seen).toBeUndefined(); // internal dedupe list is not exposed
     // Learning happened while "The Live Show" was on air — the topic knows it.
-    expect(room.nodes["burnham"].onAir["The Live Show"]).toBeGreaterThan(3.9);
+    expect(room.nodes["andy burnham"].onAir["The Live Show"]).toBeGreaterThan(3.9);
 
     // Two "visitors" read the same shared graph. Weights drift by fractions of
     // a permille between reads because decay is continuous — closeness, not
     // equality, is what "shared" means for a living value.
     const again = await (await fetch(`http://localhost:${server.port}/api/room`)).json();
-    expect(again.nodes["burnham"].weight).toBeCloseTo(room.nodes["burnham"].weight, 2);
+    expect(again.nodes["andy burnham"].weight).toBeCloseTo(room.nodes["andy burnham"].weight, 2);
   } finally {
     source.end();
     await server.stop();
@@ -384,15 +384,15 @@ test("the learned graph survives a server restart and doesn't double-count the r
   try {
     await Bun.sleep(30); // hydration settles
     const restored = await (await fetch(`http://localhost:${serverB.port}/api/room`)).json();
-    expect(Object.keys(restored.nodes)).toContain("burnham"); // knowledge survived death
+    expect(Object.keys(restored.nodes)).toContain("andy burnham"); // knowledge survived death
 
     for (const c2 of burnhamComments) sourceB.emit({ type: "comment", comment: c2 });
     await Bun.sleep(80); // learning ticks over the replayed buffer
 
     const after = await (await fetch(`http://localhost:${serverB.port}/api/room`)).json();
     // The snapshot's seen-list recognises the replayed uuids: still ~4, not 8.
-    expect(after.nodes["burnham"].weight).toBeLessThan(4.5);
-    expect(after.nodes["burnham"].weight).toBeGreaterThan(3.5);
+    expect(after.nodes["andy burnham"].weight).toBeLessThan(4.5);
+    expect(after.nodes["andy burnham"].weight).toBeGreaterThan(3.5);
   } finally {
     sourceB.end();
     await serverB.stop();

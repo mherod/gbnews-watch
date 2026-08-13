@@ -172,16 +172,18 @@ test("folds singular and plural into one trend", () => {
 });
 
 test("boosts a proper noun over a generic word of equal breadth", () => {
+  // Pinfold is deliberately NOT in the entity corpus — this exercises the
+  // generic capitalisation boost, not the entity fast-path.
   const trends = computeTrends(
     [
-      c("Burnham", { author: "a" }),
-      c("Burnham", { author: "b" }),
+      c("Pinfold", { author: "a" }),
+      c("Pinfold", { author: "b" }),
       c("reckon", { author: "c" }),
       c("reckon", { author: "d" }),
     ],
     NOW,
   );
-  expect(trends[0]?.word.toLowerCase()).toBe("burnham");
+  expect(trends[0]?.word.toLowerCase()).toBe("pinfold");
 });
 
 test("merges an overlapping proper-noun bigram and unigram into one topic", () => {
@@ -270,22 +272,23 @@ test("a term repeated by one person is filler, not a real trend", () => {
 
 test("a corpus-confirmed name merges its short form even typed lowercase", () => {
   // All lowercase, so the capitalisation signal never fires — only the news
-  // cycle knows "andy burnham" is one person's name.
+  // cycle knows "gerald pinfold" is one person's name. The name is kept out
+  // of the entity corpus so this exercises the RSS-corpus path alone.
   const comments = [
-    ...fromMany("burnham has some nerve", 8),
-    ...fromMany("andy burnham at it as usual", 3),
+    ...fromMany("pinfold has some nerve", 8),
+    ...fromMany("gerald pinfold at it as usual", 3),
   ];
-  const corpus = { stems: new Set<string>(), phrases: new Set(["andy burnham"]) };
+  const corpus = { stems: new Set<string>(), phrases: new Set(["gerald pinfold"]) };
 
   const merged = computeTrends(comments, NOW, { corpus, limit: 8 });
-  const hits = merged.filter((t) => t.word.toLowerCase().includes("burnham"));
+  const hits = merged.filter((t) => t.word.toLowerCase().includes("pinfold"));
   expect(hits).toHaveLength(1); // one person, one chip
-  expect(hits[0]!.word.toLowerCase()).toBe("andy burnham"); // upgraded to the full name
+  expect(hits[0]!.word.toLowerCase()).toBe("gerald pinfold"); // upgraded to the full name
   expect(hits[0]!.recent).toBeGreaterThanOrEqual(8); // carrying the short form's count
 
   // Without the corpus the lowercase phrase is dropped as redundant instead.
   const plain = computeTrends(comments, NOW, { limit: 8 });
-  expect(plain.some((t) => t.word.toLowerCase() === "andy burnham")).toBe(false);
+  expect(plain.some((t) => t.word.toLowerCase() === "gerald pinfold")).toBe(false);
 });
 
 test("a news-cycle corpus term outranks an equal term outside the cycle", () => {

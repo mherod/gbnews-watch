@@ -27,6 +27,21 @@ test("emoji count toward sentiment", () => {
   expect(scoreText("hmm 🤣")!).toBeGreaterThan(0);
 });
 
+test("plurals fold onto their singular entries", () => {
+  expect(scoreText("bunch of clowns")!).toBeLessThan(0); // only "clown" is scored
+  expect(scoreText("high hopes for this")!).toBeGreaterThan(0); // only "hope" is scored
+  expect(scoreText("the illegals again")!).toBeLessThan(0);
+});
+
+test("harvested live-feed vocabulary scores", () => {
+  expect(scoreText("what an obnoxious stooge")!).toBeLessThan(0);
+  expect(scoreText("the Labour mouthpiece strikes again")!).toBeLessThan(0);
+  expect(scoreText("utter twaddle from that tosser")!).toBeLessThan(0);
+  expect(scoreText("stop gaslighting us")!).toBeLessThan(0);
+  expect(scoreText("🤞")!).toBeGreaterThan(0);
+  expect(scoreText("🥂")!).toBeGreaterThan(0);
+});
+
 test("roomMood reads a heated room", () => {
   const comments = [
     at("absolute disgrace"),

@@ -33,6 +33,11 @@ export const LEXICON: Record<string, number> = {
   dreadful: -3, grim: -2, cruel: -2, brutal: -2, greedy: -2, liars: -2, cheat: -2, cheats: -2,
   cheating: -2, fraud: -2, scam: -2, fake: -2, biased: -2, traitors: -3, invaders: -2, invader: -2,
   rot: -2, rotten: -2, enough: -1, damning: -2, insane: -2,
+  // harvested from the live feed (scripts/debug-sentiment-gaps.ts) and the
+  // room's running register
+  obnoxious: -3, fool: -2, stooge: -2, fibber: -2, wreck: -2, wrecked: -2, mouthpiece: -2,
+  attack: -1, tosser: -3, gaslight: -2, gaslighting: -2, nutter: -2, eejit: -2, twaddle: -2,
+  shite: -3, garbage: -2,
 };
 
 /**
@@ -47,6 +52,8 @@ export const EMOJI_LEXICON: Record<string, number> = {
   "😠": -2, "😡": -3, "🤬": -3, "😤": -2, "👎": -2, "😢": -2, "😭": -2, "😞": -2, "😔": -2,
   "😟": -1, "😕": -1, "🙄": -2, "😒": -2, "🤮": -3, "🤢": -2, "💩": -3, "🤡": -2, "😱": -2,
   "😨": -2, "😰": -1, "🤦": -2, "🤷": -1, "😐": -1, "😑": -1, "🖕": -3, "😬": -1, "🥴": -1,
+  // harvested from the live feed
+  "🤞": 1, "🥂": 2, "🩵": 2, "🤭": 1,
 };
 
 const EMOJI_GRAPHEME = /\p{Extended_Pictographic}/u;
@@ -75,6 +82,17 @@ export interface Mood {
 
 const WORD = /[\p{L}][\p{L}']*/gu;
 
+/**
+ * Light plural fold so "clowns"/"hopes"/"illegals" score via their singular
+ * entries (both were live in the feed unscored). Exact lookup wins first, so
+ * explicitly scored plurals like "idiots" keep their own weight.
+ */
+function sentimentStem(w: string): string {
+  if (w.length > 4 && w.endsWith("ies")) return `${w.slice(0, -3)}y`;
+  if (w.length > 3 && w.endsWith("s") && !/(?:ss|us|is)$/.test(w)) return w.slice(0, -1);
+  return w;
+}
+
 /** Sentiment value of a single emoji glyph, if known. */
 export function emojiSentiment(grapheme: string): number | undefined {
   return EMOJI_LEXICON[grapheme] ?? EMOJI_LEXICON[bareEmoji(grapheme)];
@@ -91,7 +109,7 @@ export function scoreText(text: string): number | null {
       negate = true;
       continue;
     }
-    const value = LEXICON[word];
+    const value = LEXICON[word] ?? LEXICON[sentimentStem(word)];
     if (value !== undefined) {
       sum += negate ? -value : value;
       hits += 1;
