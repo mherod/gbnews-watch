@@ -12,6 +12,7 @@ import {
 } from "./schedule";
 import type { StreamEvent, StreamedComment } from "./stream";
 import { computeTrends } from "./trending";
+import { registerPresenterEntities } from "./entities";
 import type { ServerMessage, Stats, WireComment } from "./wire";
 
 const TOPIC = "comments";
@@ -105,6 +106,7 @@ export function createScheduleSupplier(options: ScheduleSupplierOptions = {}): (
             const snapshot = raw ? deserializeSchedule(raw, Date.now()) : null;
             if (snapshot) {
               cache = { at: snapshot.fetchedAt, data: snapshot.programmes };
+              registerPresenterEntities(snapshot.programmes.flatMap((p) => p.presenters));
               console.log(`schedule restored from ${store.name}: ${snapshot.programmes.length} programmes`);
               if (Date.now() - snapshot.fetchedAt < ttlMs) return snapshot.programmes;
             }
@@ -121,6 +123,9 @@ export function createScheduleSupplier(options: ScheduleSupplierOptions = {}): (
           return cache.data;
         }
         cache = { at: Date.now(), data };
+        // The billed presenters join the entity corpus, so server-side trend
+        // detection merges nicknames and surnames into proper billings.
+        registerPresenterEntities(data.flatMap((p) => p.presenters));
         if (store && data.length > 0) {
           try {
             const horizon = scheduleHorizon(data);

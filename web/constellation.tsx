@@ -174,7 +174,14 @@ export function Constellation({ graph, filter, onToggle, hostRe = null }: {
     const sim = forceSimulation<Node, Link>([])
       .force("link", forceLink<Node, Link>([]).id((d) => d.id).distance((l) => (165 - Math.min(60, l.weight * 16)) * sizeFactor()).strength((l) => Math.min(0.9, 0.3 + l.weight * 0.12)))
       .force("charge", forceManyBody<Node>().strength((d) => (-240 - nodeRadius(d) * 12) * sizeFactor()))
-      .force("collide", forceCollide<Node>().radius((d) => nodeRadius(d) + 22 * sizeFactor()).strength(1.0))
+      .force("collide", forceCollide<Node>().radius((d) => {
+        const sf = sizeFactor();
+        // The label pill below each disc is usually wider than the disc; give
+        // the physics an approximate half-pill so neighbouring labels stop
+        // stacking. ~6.2px per character at the pill's font, plus the count.
+        const pillHalf = ((`${d.label} · ${d.voices}`.length + 2) * 6.2 * Math.max(sf, 0.8)) / 2;
+        return Math.max(nodeRadius(d) + 22 * sf, pillHalf);
+      }).strength(1.0))
       .force("x", forceX<Node>().strength(0.05))
       .force("y", forceY<Node>().strength(0.065))
       .stop();

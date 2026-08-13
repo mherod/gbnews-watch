@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { entityPattern, matchEntityAt, startsUppercase } from "./entities";
+import { entityPattern, matchEntityAt, registerPresenterEntities, startsUppercase } from "./entities";
 
 /** Scan a body the way computeTrends does and list the entities detected. */
 function detect(body: string): string[] {
@@ -78,4 +78,32 @@ test("entityPattern is an alias-aware alternation for highlight/filter", () => {
   const re = new RegExp(`\\b(?:${p})\\b`, "i");
   expect(re.test("blame the Tories")).toBe(true);
   expect(re.test("a Conservative government")).toBe(true);
+});
+
+test("GB News-isms merge nicknames into the presenter's proper name", () => {
+  expect(detect("Chopper had the scoop")).toEqual(["Christopher Hope"]);
+  expect(detect("a chopper flew over")).toEqual([]); // helicopter stays lowercase
+  expect(detect("good old Nige")).toEqual(["Nigel Farage"]);
+  expect(detect("Dewbs said it best")).toEqual(["Michelle Dewberry"]);
+});
+
+test("schedule presenters register dynamically with a caps surname alias", () => {
+  registerPresenterEntities(["Camilla Tominey"]);
+  expect(detect("Camilla Tominey was right")).toEqual(["Camilla Tominey"]);
+  expect(detect("agree with Tominey there")).toEqual(["Camilla Tominey"]);
+  expect(detect("tominey lowercase")).toEqual([]); // bare surname needs caps
+});
+
+test("ambiguous surnames only match through the full billed name", () => {
+  registerPresenterEntities(["Dan Wootton-Hope", "Sam Frost"]);
+  // "Frost" is a common word — the bare surname must not register.
+  expect(detect("Sam Frost opened the show")).toEqual(["Sam Frost"]);
+  expect(detect("Frost on the windscreen this morning")).toEqual([]);
+});
+
+test("registration is idempotent and never overwrites hand-curated entries", () => {
+  const before = entityPattern("Tom Harwood");
+  registerPresenterEntities(["Tom Harwood", "Tom Harwood"]);
+  expect(entityPattern("Tom Harwood")).toBe(before!);
+  expect(detect("Harwood nailed it")).toEqual(["Tom Harwood"]);
 });

@@ -145,6 +145,36 @@ export const ENTITIES: Entity[] = [
   { canonical: "ULEZ", category: "other", aliases: [{ text: "ulez" }] },
   { canonical: "Net Zero", category: "other", aliases: [{ text: "net zero" }, { text: "netzero" }] },
   { canonical: "Monarchy", category: "other", aliases: [{ text: "monarchy" }, { text: "royal family" }] },
+
+  // ---- GB News-isms: presenters and channel vocabulary the room uses ----
+  // Nicknames merge into the presenter's proper name so the wire, the map and
+  // the host machinery all tell one story. Same stability rule as above: only
+  // long-running on-air names; ambiguous short forms carry requireCaps.
+  {
+    canonical: "Christopher Hope",
+    category: "other",
+    aliases: [caps("chopper"), { text: "christopher hope" }, { text: "chris hope" }], // caps: a helicopter is lowercase
+  },
+  {
+    canonical: "Nigel Farage",
+    category: "other",
+    aliases: [{ text: "nigel farage" }, caps("farage"), caps("nige")],
+  },
+  {
+    canonical: "Jacob Rees-Mogg",
+    category: "other",
+    aliases: [{ text: "jacob rees-mogg" }, { text: "rees-mogg" }, { text: "rees mogg" }, caps("mogg"), caps("moggster")],
+  },
+  { canonical: "Patrick Christys", category: "other", aliases: [{ text: "patrick christys" }, caps("christys")] },
+  { canonical: "Tom Harwood", category: "other", aliases: [{ text: "tom harwood" }, caps("harwood")] },
+  { canonical: "Eamonn Holmes", category: "other", aliases: [{ text: "eamonn holmes" }, caps("eamonn")] },
+  {
+    canonical: "Michelle Dewberry",
+    category: "other",
+    aliases: [{ text: "michelle dewberry" }, caps("dewberry"), caps("dewbs")], // Dewbs & Co
+  },
+  { canonical: "Martin Daubney", category: "other", aliases: [{ text: "martin daubney" }, caps("daubney")] },
+  { canonical: "Beverley Turner", category: "other", aliases: [{ text: "beverley turner" }, { text: "bev turner" }] },
 ];
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -158,7 +188,7 @@ const SINGLE = new Map<string, AliasEntry>();
 const DOUBLE = new Map<string, AliasEntry>();
 const PATTERNS = new Map<string, string>();
 
-for (const e of ENTITIES) {
+function indexEntity(e: Entity): void {
   const forms = new Set<string>([e.canonical.toLowerCase()]);
   for (const a of e.aliases) {
     const key = a.text.trim().toLowerCase();
@@ -178,6 +208,47 @@ for (const e of ENTITIES) {
     e.canonical,
     [...forms].sort((a, b) => b.length - a.length).map(escapeRegex).join("|"),
   );
+}
+
+for (const e of ENTITIES) indexEntity(e);
+
+// ---- Dynamic presenters, sourced from the broadcast schedule ----
+
+/**
+ * Surnames that double as everyday words: a bare capitalised token at a
+ * sentence start would false-positive constantly, so these only ever match
+ * through the presenter's full billed name.
+ */
+const AMBIGUOUS_SURNAMES = new Set([
+  "hope", "frost", "may", "west", "young", "long", "price", "wood", "banks",
+  "brown", "white", "green", "black", "gray", "grey", "stone", "hill", "day",
+  "knight", "bell", "fox", "field", "castle", "swift", "walker", "cook",
+]);
+
+const registeredPresenters = new Set<string>();
+
+/**
+ * Merge broadcast-schedule presenters into the live corpus. Every billed name
+ * joins with its full form; a Capitalised bare-surname alias is added only
+ * when the surname is neither a common word nor already claimed. Idempotent
+ * per name, and hand-curated entries always win — the schedule never
+ * overwrites a vetted static entity.
+ */
+export function registerPresenterEntities(names: readonly string[]): void {
+  for (const raw of names) {
+    const name = raw.trim().replace(/\s+/g, " ");
+    if (!name || !name.includes(" ")) continue; // single-word billings are too ambiguous
+    const key = name.toLowerCase();
+    if (registeredPresenters.has(key)) continue;
+    registeredPresenters.add(key);
+    if (PATTERNS.has(name)) continue; // hand-curated above
+    const aliases: EntityAlias[] = [{ text: key }];
+    const surname = key.split(" ").pop()!;
+    if (surname.length >= 3 && !AMBIGUOUS_SURNAMES.has(surname) && !SINGLE.has(surname)) {
+      aliases.push(caps(surname));
+    }
+    indexEntity({ canonical: name, category: "other", aliases });
+  }
 }
 
 /** True when the token begins with an uppercase letter (NHS, Wales, Reform). */

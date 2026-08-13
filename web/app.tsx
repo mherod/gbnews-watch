@@ -26,6 +26,7 @@ import {
   memoryToGraph,
   type TopicMemory,
 } from "../src/memory";
+import { entityPattern, registerPresenterEntities } from "../src/entities";
 import { Constellation } from "./constellation";
 import { UnionJack } from "./union-jack";
 import { UnionJackBackdrop } from "./union-jack-backdrop";
@@ -355,7 +356,14 @@ function useSchedule(): WireProgramme[] {
         if (!res.ok) return;
         const json = await res.json();
         if (cancelled) return;
-        if (Array.isArray(json.programmes)) setProgrammes(json.programmes);
+        if (Array.isArray(json.programmes)) {
+          // Register before rendering so the host machinery and trend
+          // detector already know every billed presenter's aliases.
+          registerPresenterEntities(
+            json.programmes.flatMap((p: WireProgramme) => p.presenters ?? []),
+          );
+          setProgrammes(json.programmes);
+        }
       } catch {
         /* offline — keep showing the last grid we fetched */
       }
@@ -489,6 +497,7 @@ function highlightBody(
   filterLower: string | null,
   onTerm: (term: string) => void,
   hostRe: RegExp | null,
+  exHostRe: RegExp | null,
 ): ReactNode {
   const spans: Span[] = [];
 
@@ -529,10 +538,11 @@ function highlightBody(
     if (s.start > last) nodes.push(text.slice(last, s.start));
     const isFilter = s.kind === "filter";
     const isHost = !isFilter && hostRe !== null && hostRe.test(s.text);
+    const isExHost = !isFilter && !isHost && exHostRe !== null && exHostRe.test(s.text);
     nodes.push(
       <mark
         key={s.start}
-        className={isFilter ? "hl hl--filter" : isHost ? "hl hl--host" : "hl"}
+        className={isFilter ? "hl hl--filter" : isHost ? "hl hl--host" : isExHost ? "hl hl--exhost" : "hl"}
         role="button"
         tabIndex={0}
         aria-pressed={isFilter}
@@ -558,13 +568,14 @@ function highlightBody(
 }
 
 /** Comment body clamped to a few lines, expandable when it overflows. */
-function CommentBody({ text, terms, termsKey, filterLower, onTerm, hostRe }: {
+function CommentBody({ text, terms, termsKey, filterLower, onTerm, hostRe, exHostRe }: {
   text: string;
   terms: readonly HlTerm[];
   termsKey: string;
   filterLower: string | null;
   onTerm: (term: string) => void;
   hostRe: RegExp | null;
+  exHostRe: RegExp | null;
 }) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -577,9 +588,9 @@ function CommentBody({ text, terms, termsKey, filterLower, onTerm, hostRe }: {
   }, [text, expanded]);
 
   const content = useMemo(
-    () => highlightBody(text, terms, filterLower, onTerm, hostRe),
+    () => highlightBody(text, terms, filterLower, onTerm, hostRe, exHostRe),
     // termsKey stands in for the terms array; onTerm is stable.
-    [text, termsKey, filterLower, onTerm, hostRe],
+    [text, termsKey, filterLower, onTerm, hostRe, exHostRe],
   );
 
   const clamped = !expanded;
@@ -608,13 +619,14 @@ function CommentBody({ text, terms, termsKey, filterLower, onTerm, hostRe }: {
   );
 }
 
-const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm, hostRe }: {
+const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm, hostRe, exHostRe }: {
   c: CommentView;
   terms: readonly HlTerm[];
   termsKey: string;
   filterLower: string | null;
   onTerm: (term: string) => void;
   hostRe: RegExp | null;
+  exHostRe: RegExp | null;
 }) {
   const isReply = c.kind === "reply";
   const style = avatarStyle(c.author);
@@ -701,6 +713,7 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm,
           filterLower={filterLower}
           onTerm={onTerm}
           hostRe={hostRe}
+          exHostRe={exHostRe}
         />
 
         <div className="comment__foot">
@@ -752,10 +765,11 @@ function endTimeLabel(iso: string) {
  * reacting to. Replays are labelled as such so a heated feed under a repeat
  * isn't mistaken for a reaction to live events.
  */
-function OnAir({ programme, verdict, hostFirst }: {
+function OnAir({ programme, verdict, hostFirst, next }: {
   programme: WireProgramme | undefined;
   verdict: Mood | null;
   hostFirst: string | null;
+  next: WireProgramme | undefined;
 }) {
   if (!programme) return null;
   const live = programme.type.toLowerCase() === "live";
@@ -778,6 +792,11 @@ function OnAir({ programme, verdict, hostFirst }: {
           title={`Sentiment across recent dispatches mentioning ${hostFirst}`}
         >
           The room on {hostFirst}: <b className={`onair__verdict--${verdict.tone}`}>{verdict.label}</b>
+        </p>
+      )}
+      {next && (
+        <p className="onair__next" title={next.description || undefined}>
+          Next: {next.title} · {endTimeLabel(next.start)}
         </p>
       )}
     </div>
@@ -956,7 +975,7 @@ function TrendBar({ trends, filter, onToggle, emoji, host, hostActive }: {
   );
 }
 
-function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggleFilter, mood, emoji, onAir, host, hostActive, hostVerdict }: {
+function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggleFilter, mood, emoji, onAir, nextUp, host, hostActive, hostVerdict }: {
   stats: Stats;
   connected: boolean;
   arrivals: number[];
@@ -968,6 +987,7 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
   mood: Mood | null;
   emoji: EmojiCount[];
   onAir: WireProgramme | undefined;
+  nextUp: WireProgramme | undefined;
   host: { display: string; first: string } | null;
   hostActive: boolean;
   hostVerdict: Mood | null;
@@ -1021,7 +1041,7 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
           <StatTile value={stats.total} label="dispatches" />
         </div>
       </div>
-      <OnAir programme={onAir} verdict={hostVerdict} hostFirst={host?.first ?? null} />
+      <OnAir programme={onAir} verdict={hostVerdict} hostFirst={host?.first ?? null} next={nextUp} />
       <TrendBar trends={trends} filter={filter} onToggle={onToggleFilter} emoji={emoji} host={host} hostActive={hostActive} />
     </header>
   );
@@ -1057,6 +1077,11 @@ function App() {
         parts.add(esc(words[words.length - 1]!));
       }
     }
+    // Corpus aliases count as mentions too — "Chopper" is Christopher Hope.
+    for (const n of names) {
+      const ep = entityPattern(n);
+      if (ep) parts.add(ep);
+    }
     const pattern = [...parts].sort((a, b) => b.length - a.length).join("|");
     return {
       display: names[0]!,
@@ -1069,11 +1094,46 @@ function App() {
   // How the room is taking the host: share of recent dispatches that mention
   // them, and the mood across just those dispatches.
   const hostStats = useMemo(() => {
-    if (!host || comments.length === 0) return null;
-    const mentioning = comments.filter((c) => host.re.test(c.body));
-    const share = Math.round((mentioning.length / comments.length) * 100);
+    if (!host || !onAir || comments.length === 0) return null;
+    // Only dispatches posted since this programme began count against this
+    // host — Tom doesn't inherit Patrick's hecklers.
+    const startMs = Date.parse(onAir.start);
+    const during = Number.isFinite(startMs)
+      ? comments.filter((c) => new Date(c.postedAt).getTime() >= startMs)
+      : comments;
+    if (during.length === 0) return null;
+    const mentioning = during.filter((c) => host.re.test(c.body));
+    const share = Math.round((mentioning.length / during.length) * 100);
     return { share, mood: roomMood(mentioning, Date.now(), { windowMs: 600_000, minScored: 3 }) };
-  }, [comments, host]);
+  }, [comments, host, onAir]);
+
+  // Handovers observed while this tab was open — each becomes an
+  // edition-change rule in the feed at the second the billing flipped.
+  const [handovers, setHandovers] = useState<{ at: number; title: string; presenter?: string }[]>([]);
+  const prevProgrammeRef = useRef<string | null>(null);
+  useEffect(() => {
+    const title = onAir?.title ?? null;
+    if (title !== null && prevProgrammeRef.current !== null && title !== prevProgrammeRef.current && onAir) {
+      const at = Date.parse(onAir.start);
+      setHandovers((h) =>
+        [...h, { at: Number.isFinite(at) ? at : Date.now(), title, presenter: onAir.presenters[0] }].slice(-4),
+      );
+    }
+    if (title !== null) prevProgrammeRef.current = title;
+  }, [onAir]);
+
+  // The previous host keeps a dimmed highlight for a while after handover, so
+  // the subject of half the thread doesn't vanish mid-conversation.
+  const prevHostRef = useRef<typeof host>(null);
+  const [exHost, setExHost] = useState<{ h: NonNullable<typeof host>; until: number } | null>(null);
+  useEffect(() => {
+    const prev = prevHostRef.current;
+    if (prev && host && prev.display !== host.display) {
+      setExHost({ h: prev, until: Date.now() + 15 * 60_000 });
+    }
+    prevHostRef.current = host;
+  }, [host]);
+  const exHostActive = exHost && exHost.until > now && (!host || exHost.h.display !== host.display) ? exHost.h : null;
 
   // The shared association memory, learned server-side from every comment —
   // even while nobody watches — and identical for every visitor. Created
@@ -1100,6 +1160,16 @@ function App() {
     () => (host ? trends.filter((t) => !host.re.test(t.word)) : trends),
     [trends, host],
   );
+
+  // What follows this programme — the listings line at the foot of the billing.
+  const nextUp = useMemo(() => {
+    let best: WireProgramme | undefined;
+    for (const p of programmes) {
+      const s = Date.parse(p.start);
+      if (s > now && (!best || s < Date.parse(best.start))) best = p;
+    }
+    return best;
+  }, [programmes, now]);
   // The filter arrives from the URL so a shared or reloaded link reopens the
   // same slice of the room; every toggle is folded back into ?f= below.
   const [filter, setFilter] = useState<string | null>(
@@ -1126,12 +1196,16 @@ function App() {
   const highlightTerms = useMemo<HlTerm[]>(() => {
     const map = new Map<string, HlTerm>();
     for (const t of trends) map.set(t.word.toLowerCase(), { word: t.word, pattern: t.pattern });
-    // The host is always a highlight term while on air, alias-aware.
+    // The host is always a highlight term while on air, alias-aware; the
+    // previous host stays a (dimmed) term through the handover cooldown.
     if (host) map.set(host.display.toLowerCase(), { word: host.display, pattern: host.pattern });
+    if (exHostActive && !map.has(exHostActive.display.toLowerCase())) {
+      map.set(exHostActive.display.toLowerCase(), { word: exHostActive.display, pattern: exHostActive.pattern });
+    }
     // Word filters join the highlight set; an emoji filter doesn't (it's tinted already).
     if (filter && !isEmoji(filter) && !map.has(filter.toLowerCase())) map.set(filter.toLowerCase(), { word: filter });
     return [...map.values()];
-  }, [trends, filter, host]);
+  }, [trends, filter, host, exHostActive]);
   const termsKey = highlightTerms.map((t) => t.pattern ?? t.word).join("|").toLowerCase();
   const filterLower = filter?.toLowerCase() ?? null;
   // Resolve an active filter to its entity pattern so filtering by "Conservative"
@@ -1140,10 +1214,12 @@ function App() {
     if (!filterLower) return undefined;
     const fromTrends = trends.find((t) => t.word.toLowerCase() === filterLower)?.pattern;
     if (fromTrends) return fromTrends;
-    // Filtering by the host (chip or highlight) catches every alias.
+    // Filtering by the host (chip or highlight) catches every alias — the
+    // outgoing host too, through the cooldown.
     if (host && host.re.test(filterLower)) return host.pattern;
+    if (exHostActive && exHostActive.re.test(filterLower)) return exHostActive.pattern;
     return undefined;
-  }, [trends, filterLower, host]);
+  }, [trends, filterLower, host, exHostActive]);
 
   // The tab strip is a surface too: name the slice being watched, else the
   // programme being reacted to, so the tab is findable across a wall of tabs.
@@ -1266,6 +1342,20 @@ function App() {
     ? Math.round((comments.filter((c) => c.kind === "reply").length / comments.length) * 100)
     : 0;
 
+  // Comments and handover rules merged newest-first; on a tie the comment
+  // (posted after the flip) sits above the rule it belongs to.
+  const feedItems = useMemo(() => {
+    type FeedItem =
+      | { kind: "comment"; at: number; c: CommentView }
+      | { kind: "handover"; at: number; title: string; presenter?: string };
+    const oldest = filtered.length > 0 ? filtered[filtered.length - 1]!.timeMs : Infinity;
+    const cs: FeedItem[] = filtered.map((c) => ({ kind: "comment", at: c.timeMs, c }));
+    const hs: FeedItem[] = handovers
+      .filter((h) => h.at >= oldest)
+      .map((h) => ({ kind: "handover", at: h.at, title: h.title, presenter: h.presenter }));
+    return [...cs, ...hs].sort((a, b) => b.at - a.at);
+  }, [filtered, handovers]);
+
   return (
     <>
       <UnionJackBackdrop />
@@ -1282,6 +1372,7 @@ function App() {
         emoji={emoji}
         onAir={onAir}
         host={host}
+        nextUp={nextUp}
         hostActive={host ? filter === host.pattern || (filter !== null && host.re.test(filter)) : false}
         hostVerdict={hostStats?.mood ?? null}
       />
@@ -1370,17 +1461,30 @@ function App() {
               </div>
             ) : (
               <ul className="feed">
-                {filtered.map((c) => (
-                  <Comment
-                    key={c.uuid}
-                    c={c}
-                    terms={highlightTerms}
-                    termsKey={termsKey}
-                    filterLower={filterLower}
-                    onTerm={toggleFilter}
-                    hostRe={host?.re ?? null}
-                  />
-                ))}
+                {feedItems.map((item) =>
+                  item.kind === "handover" ? (
+                    <li key={`h-${item.at}`} className="handover">
+                      <i aria-hidden="true" />
+                      <span>
+                        {new Date(item.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · now
+                        on air: {item.title}
+                        {item.presenter ? ` with ${item.presenter}` : ""}
+                      </span>
+                      <i aria-hidden="true" />
+                    </li>
+                  ) : (
+                    <Comment
+                      key={item.c.uuid}
+                      c={item.c}
+                      terms={highlightTerms}
+                      termsKey={termsKey}
+                      filterLower={filterLower}
+                      onTerm={toggleFilter}
+                      hostRe={host?.re ?? null}
+                      exHostRe={exHostActive?.re ?? null}
+                    />
+                  ),
+                )}
               </ul>
             )}
           </>

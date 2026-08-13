@@ -632,5 +632,16 @@ export function mergeStickyTrends(
   const freshReal = fresh.filter((t) => !t.weak).sort((a, b) => b.score - a.score);
   const freshWeak = fresh.filter((t) => t.weak).sort((a, b) => b.score - a.score);
 
-  return [...freshReal, ...faded, ...freshWeak].slice(0, display);
+  // The row is keyed by display word — a sticky entry whose stored trend now
+  // renders the same label as a fresh chip must not appear twice.
+  const seen = new Set<string>();
+  const row: Trend[] = [];
+  for (const t of [...freshReal, ...faded, ...freshWeak]) {
+    const key = t.word.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    row.push(t);
+    if (row.length === display) break;
+  }
+  return row;
 }

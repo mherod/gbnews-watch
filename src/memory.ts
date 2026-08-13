@@ -655,7 +655,28 @@ export function canonicalizeTrends(mem: TopicMemory, trends: readonly Trend[]): 
     out.push(canonical);
   }
 
-  return out;
+  // Distinct memory nodes can render identical display labels (punctuation and
+  // casing variants collapsed by prettyLabel) — one display word gets one chip,
+  // with the alias patterns merged so filtering still catches every variant.
+  const byLabel = new Map<string, Trend>();
+  const deduped: Trend[] = [];
+  for (const t of out) {
+    const key = t.word.toLowerCase();
+    const existing = byLabel.get(key);
+    if (existing) {
+      existing.recent = Math.max(existing.recent, t.recent);
+      existing.score = Math.max(existing.score, t.score);
+      existing.authors = Math.max(existing.authors ?? 0, t.authors ?? 0);
+      if (t.pattern && t.pattern !== existing.pattern) {
+        existing.pattern = [existing.pattern, t.pattern].filter(Boolean).join("|");
+      }
+      if (t.weak === false || existing.weak === false) existing.weak = undefined;
+      continue;
+    }
+    byLabel.set(key, t);
+    deduped.push(t);
+  }
+  return deduped;
 }
 
 /** Round-trips the memory through storage, tolerating anything malformed. */

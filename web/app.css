@@ -402,6 +402,19 @@ body {
   color: var(--live);
 }
 
+/* The listings tail — what follows this programme. */
+.onair__next {
+  margin: 4px 0 0;
+  font-size: var(--fs-caps);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .masthead--condensed .onair {
   padding: 4px 10px;
 }
@@ -412,7 +425,8 @@ body {
 
 .masthead--condensed .onair__desc,
 .masthead--condensed .onair__with,
-.masthead--condensed .onair__verdict {
+.masthead--condensed .onair__verdict,
+.masthead--condensed .onair__next {
   display: none;
 }
 
@@ -1245,6 +1259,12 @@ body {
   font-weight: 600;
 }
 
+/* The outgoing host, through the handover cooldown — same register, dimmed. */
+.hl--exhost {
+  background: color-mix(in srgb, var(--routemaster) 7%, transparent);
+  box-shadow: inset 0 -1.5px 0 color-mix(in srgb, var(--routemaster) 45%, transparent);
+}
+
 @media (hover: hover) {
   .hl--host:hover {
     background: color-mix(in srgb, var(--routemaster) 26%, transparent);
@@ -1304,6 +1324,33 @@ body {
   color: var(--accent);
   font-weight: 600;
   padding: 2px 6px;
+}
+
+/* Edition-change rule — printed in the feed at the second the billing flipped. */
+.handover {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 2px;
+  color: var(--ink-faint);
+  font-size: var(--fs-caps);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.handover i {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--routemaster) 45%, var(--line)), transparent);
+}
+
+.handover span {
+  flex-shrink: 0;
+  max-width: 82%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Jump-to-parent flash — scrollToParent re-triggers this class. */
