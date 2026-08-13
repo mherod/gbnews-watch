@@ -52,6 +52,12 @@ html {
   scroll-padding-top: calc(env(safe-area-inset-top) + 64px);
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
 html,
 body {
   margin: 0;
@@ -706,14 +712,19 @@ body {
   font-weight: 600;
   padding: 4px 11px;
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.08s ease;
 }
 
 @media (hover: hover) {
   .room-panel__toggle:hover {
     color: var(--ink);
     border-color: var(--ink-faint);
+    background: var(--panel-2);
   }
+}
+
+.room-panel__toggle:active {
+  transform: scale(0.96);
 }
 
 .room-panel--closed .room-panel__bar {
@@ -848,7 +859,7 @@ body {
   font: inherit;
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.08s ease;
 }
 
 @media (hover: hover) {
@@ -856,6 +867,10 @@ body {
     background: var(--panel-2);
     color: var(--ink);
   }
+}
+
+.feed__clear:active {
+  transform: scale(0.96);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -952,15 +967,28 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .trends,
+  .trends__chip,
+  .trends__caret,
+  .emoji-chip,
+  .room-panel__toggle,
+  .feed__clear,
   .comment,
-  .comment--flash {
-    animation: none;
-  }
-  .status--live .status__dot {
-    animation: none;
-  }
-  .spark__bar {
-    transition: none;
+  .comment--flash,
+  .status--live .status__dot,
+  .spark__bar,
+  .waiting__bars i {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
   }
 }
 
@@ -1158,7 +1186,7 @@ body {
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.08s ease;
 }
 
 @media (hover: hover) {
@@ -1167,9 +1195,14 @@ body {
   }
 }
 
+.comment__more:active {
+  transform: scale(0.97);
+}
+
 .chatty {
   font-size: 11px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 14%, transparent);
   padding: 1px 7px;
@@ -1205,6 +1238,7 @@ body {
   font-weight: 650;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
   padding: 2px 6px;
   border-radius: 5px;
 }

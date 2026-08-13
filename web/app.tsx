@@ -577,7 +577,13 @@ function CommentBody({ text, terms, termsKey, filterLower, onTerm }: {
         {content}
       </p>
       {overflows && (
-        <button type="button" className="comment__more" onClick={() => setExpanded((v) => !v)}>
+        <button
+          type="button"
+          className="comment__more"
+          aria-expanded={expanded}
+          title={expanded ? "Show fewer lines of this comment" : "Expand full comment body"}
+          onClick={() => setExpanded((v) => !v)}
+        >
           {expanded ? "Show less" : "Show more"}
         </button>
       )}
@@ -1161,7 +1167,13 @@ function App() {
                 The Room
                 <span>learned over time · tethered when argued in one breath · size = how much it dominates · colour = mood</span>
               </h2>
-              <button type="button" className="room-panel__toggle" onClick={() => setShowRoom((v) => !v)}>
+              <button
+                type="button"
+                className="room-panel__toggle"
+                aria-expanded={showRoom}
+                title={showRoom ? "Hide topic constellation map" : "Show topic constellation map"}
+                onClick={() => setShowRoom((v) => !v)}
+              >
                 {showRoom ? "Hide map" : "Show map"}
               </button>
             </div>
@@ -1186,7 +1198,13 @@ function App() {
                 <span>
                   Filtering <b>“{filter}”</b> · {filtered.length} {filtered.length === 1 ? "match" : "matches"}
                 </span>
-                <button type="button" className="feed__clear" onClick={() => setFilter(null)}>
+                <button
+                  type="button"
+                  className="feed__clear"
+                  title="Clear active filter"
+                  aria-label={`Clear active filter “${filter}”`}
+                  onClick={() => setFilter(null)}
+                >
                   Clear ✕
                 </button>
               </p>
