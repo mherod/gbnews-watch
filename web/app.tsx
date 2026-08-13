@@ -488,6 +488,7 @@ function highlightBody(
   terms: readonly HlTerm[],
   filterLower: string | null,
   onTerm: (term: string) => void,
+  hostRe: RegExp | null,
 ): ReactNode {
   const spans: Span[] = [];
 
@@ -527,10 +528,11 @@ function highlightBody(
   for (const s of chosen) {
     if (s.start > last) nodes.push(text.slice(last, s.start));
     const isFilter = s.kind === "filter";
+    const isHost = !isFilter && hostRe !== null && hostRe.test(s.text);
     nodes.push(
       <mark
         key={s.start}
-        className={isFilter ? "hl hl--filter" : "hl"}
+        className={isFilter ? "hl hl--filter" : isHost ? "hl hl--host" : "hl"}
         role="button"
         tabIndex={0}
         aria-pressed={isFilter}
@@ -556,12 +558,13 @@ function highlightBody(
 }
 
 /** Comment body clamped to a few lines, expandable when it overflows. */
-function CommentBody({ text, terms, termsKey, filterLower, onTerm }: {
+function CommentBody({ text, terms, termsKey, filterLower, onTerm, hostRe }: {
   text: string;
   terms: readonly HlTerm[];
   termsKey: string;
   filterLower: string | null;
   onTerm: (term: string) => void;
+  hostRe: RegExp | null;
 }) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -574,9 +577,9 @@ function CommentBody({ text, terms, termsKey, filterLower, onTerm }: {
   }, [text, expanded]);
 
   const content = useMemo(
-    () => highlightBody(text, terms, filterLower, onTerm),
+    () => highlightBody(text, terms, filterLower, onTerm, hostRe),
     // termsKey stands in for the terms array; onTerm is stable.
-    [text, termsKey, filterLower, onTerm],
+    [text, termsKey, filterLower, onTerm, hostRe],
   );
 
   const clamped = !expanded;
@@ -605,12 +608,13 @@ function CommentBody({ text, terms, termsKey, filterLower, onTerm }: {
   );
 }
 
-const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm }: {
+const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm, hostRe }: {
   c: CommentView;
   terms: readonly HlTerm[];
   termsKey: string;
   filterLower: string | null;
   onTerm: (term: string) => void;
+  hostRe: RegExp | null;
 }) {
   const isReply = c.kind === "reply";
   const style = avatarStyle(c.author);
@@ -696,6 +700,7 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm 
           termsKey={termsKey}
           filterLower={filterLower}
           onTerm={onTerm}
+          hostRe={hostRe}
         />
 
         <div className="comment__foot">
@@ -747,7 +752,11 @@ function endTimeLabel(iso: string) {
  * reacting to. Replays are labelled as such so a heated feed under a repeat
  * isn't mistaken for a reaction to live events.
  */
-function OnAir({ programme }: { programme: WireProgramme | undefined }) {
+function OnAir({ programme, verdict, hostFirst }: {
+  programme: WireProgramme | undefined;
+  verdict: Mood | null;
+  hostFirst: string | null;
+}) {
   if (!programme) return null;
   const live = programme.type.toLowerCase() === "live";
   return (
@@ -763,6 +772,14 @@ function OnAir({ programme }: { programme: WireProgramme | undefined }) {
         <span className="onair__until">until {endTimeLabel(programme.end)}</span>
       </div>
       {programme.description && <p className="onair__desc">{programme.description}</p>}
+      {verdict && hostFirst && (
+        <p
+          className="onair__verdict"
+          title={`Sentiment across recent dispatches mentioning ${hostFirst}`}
+        >
+          The room on {hostFirst}: <b className={`onair__verdict--${verdict.tone}`}>{verdict.label}</b>
+        </p>
+      )}
     </div>
   );
 }
@@ -770,11 +787,13 @@ function OnAir({ programme }: { programme: WireProgramme | undefined }) {
 /** How long a ▲/▼ rank-change caret stays on a chip. */
 const CARET_MS = 2600;
 
-function TrendBar({ trends, filter, onToggle, emoji }: {
+function TrendBar({ trends, filter, onToggle, emoji, host, hostActive }: {
   trends: Trend[];
   filter: string | null;
   onToggle: (word: string) => void;
   emoji: EmojiCount[];
+  host: { display: string } | null;
+  hostActive: boolean;
 }) {
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const chipsRef = useRef<HTMLDivElement>(null);
@@ -863,12 +882,24 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
     return () => clearTimeout(id);
   }, [moves]);
 
-  if (trends.length === 0 && emoji.length === 0) return null;
+  if (trends.length === 0 && emoji.length === 0 && !host) return null;
   // When every chip is single-voice filler, nothing is really trending — say so.
   const allWeak = trends.length > 0 && trends.every((t) => t.weak);
   return (
     <div className="trends" aria-label="Trending words">
       <span className="trends__label">Fleet Street Wire</span>
+      {host && (
+        <button
+          type="button"
+          className={`trends__chip trends__chip--host${hostActive ? " trends__chip--active" : ""}`}
+          aria-pressed={hostActive}
+          title={hostActive ? "Clear filter" : `Filter to dispatches mentioning ${host.display}`}
+          onClick={() => onToggle(host.display)}
+        >
+          <i className="trends__hostdot" aria-hidden="true" />
+          {host.display}
+        </button>
+      )}
       {allWeak && <span className="trends__quiet" title="No topic has caught on with more than one person yet">· quiet in the chamber</span>}
       <div className="trends__chips" ref={wireFades}>
         {trends.map((t) => {
@@ -925,7 +956,7 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
   );
 }
 
-function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggleFilter, mood, emoji, onAir }: {
+function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggleFilter, mood, emoji, onAir, host, hostActive, hostVerdict }: {
   stats: Stats;
   connected: boolean;
   arrivals: number[];
@@ -937,6 +968,9 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
   mood: Mood | null;
   emoji: EmojiCount[];
   onAir: WireProgramme | undefined;
+  host: { display: string; first: string } | null;
+  hostActive: boolean;
+  hostVerdict: Mood | null;
 }) {
   const statusClass = connected && stats.upstream === "live"
     ? "status status--live"
@@ -987,8 +1021,8 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
           <StatTile value={stats.total} label="dispatches" />
         </div>
       </div>
-      <OnAir programme={onAir} />
-      <TrendBar trends={trends} filter={filter} onToggle={onToggleFilter} emoji={emoji} />
+      <OnAir programme={onAir} verdict={hostVerdict} hostFirst={host?.first ?? null} />
+      <TrendBar trends={trends} filter={filter} onToggle={onToggleFilter} emoji={emoji} host={host} hostActive={hostActive} />
     </header>
   );
 }
@@ -1003,6 +1037,43 @@ function App() {
   // Cheap enough to run on the 1s clock — this is what makes a handover flip
   // on time even though the grid itself is only polled every few minutes.
   const onAir = onAirNow(programmes, now);
+
+  // The broadcaster on air, as a matchable identity: full names plus first and
+  // last names of every billed presenter, longest-first so whole names win.
+  // Everything host-aware on the page (highlights, the pinned wire chip, the
+  // landlord node, the verdict) derives from this one object. The memo keys on
+  // a flat string so a fresh programmes array with the same billing is a no-op.
+  const presenterKey = (onAir?.presenters ?? []).map((n) => n.trim()).filter(Boolean).join("\n");
+  const host = useMemo(() => {
+    const names = presenterKey ? presenterKey.split("\n") : [];
+    if (names.length === 0) return null;
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const parts = new Set<string>();
+    for (const n of names) {
+      parts.add(esc(n));
+      const words = n.split(/\s+/);
+      if (words.length > 1) {
+        parts.add(esc(words[0]!));
+        parts.add(esc(words[words.length - 1]!));
+      }
+    }
+    const pattern = [...parts].sort((a, b) => b.length - a.length).join("|");
+    return {
+      display: names[0]!,
+      first: names[0]!.split(/\s+/)[0]!,
+      pattern,
+      re: new RegExp(`\\b(${pattern})\\b`, "i"),
+    };
+  }, [presenterKey]);
+
+  // How the room is taking the host: share of recent dispatches that mention
+  // them, and the mood across just those dispatches.
+  const hostStats = useMemo(() => {
+    if (!host || comments.length === 0) return null;
+    const mentioning = comments.filter((c) => host.re.test(c.body));
+    const share = Math.round((mentioning.length / comments.length) * 100);
+    return { share, mood: roomMood(mentioning, Date.now(), { windowMs: 600_000, minScored: 3 }) };
+  }, [comments, host]);
 
   // The shared association memory, learned server-side from every comment —
   // even while nobody watches — and identical for every visitor. Created
@@ -1022,6 +1093,13 @@ function App() {
   }
 
   const trends = useTrends(comments, corpus, memoryRef);
+
+  // The host owns a pinned chip on the wire, so alias fragments of their name
+  // ("Patrick Ask") come out of the ordinary trend row.
+  const wireTrends = useMemo(
+    () => (host ? trends.filter((t) => !host.re.test(t.word)) : trends),
+    [trends, host],
+  );
   // The filter arrives from the URL so a shared or reloaded link reopens the
   // same slice of the room; every toggle is folded back into ?f= below.
   const [filter, setFilter] = useState<string | null>(
@@ -1048,18 +1126,24 @@ function App() {
   const highlightTerms = useMemo<HlTerm[]>(() => {
     const map = new Map<string, HlTerm>();
     for (const t of trends) map.set(t.word.toLowerCase(), { word: t.word, pattern: t.pattern });
+    // The host is always a highlight term while on air, alias-aware.
+    if (host) map.set(host.display.toLowerCase(), { word: host.display, pattern: host.pattern });
     // Word filters join the highlight set; an emoji filter doesn't (it's tinted already).
     if (filter && !isEmoji(filter) && !map.has(filter.toLowerCase())) map.set(filter.toLowerCase(), { word: filter });
     return [...map.values()];
-  }, [trends, filter]);
+  }, [trends, filter, host]);
   const termsKey = highlightTerms.map((t) => t.pattern ?? t.word).join("|").toLowerCase();
   const filterLower = filter?.toLowerCase() ?? null;
   // Resolve an active filter to its entity pattern so filtering by "Conservative"
   // also catches "Tory".
-  const filterPattern = useMemo(
-    () => (filterLower ? trends.find((t) => t.word.toLowerCase() === filterLower)?.pattern : undefined),
-    [trends, filterLower],
-  );
+  const filterPattern = useMemo(() => {
+    if (!filterLower) return undefined;
+    const fromTrends = trends.find((t) => t.word.toLowerCase() === filterLower)?.pattern;
+    if (fromTrends) return fromTrends;
+    // Filtering by the host (chip or highlight) catches every alias.
+    if (host && host.re.test(filterLower)) return host.pattern;
+    return undefined;
+  }, [trends, filterLower, host]);
 
   // The tab strip is a surface too: name the slice being watched, else the
   // programme being reacted to, so the tab is findable across a wall of tabs.
@@ -1191,12 +1275,15 @@ function App() {
         arrivals={arrivals}
         peak={peakPerMinute}
         now={now}
-        trends={trends}
+        trends={wireTrends}
         filter={filter}
         onToggleFilter={toggleFilter}
         mood={mood}
         emoji={emoji}
         onAir={onAir}
+        host={host}
+        hostActive={host ? filter === host.pattern || (filter !== null && host.re.test(filter)) : false}
+        hostVerdict={hostStats?.mood ?? null}
       />
       <main className="shell">
         {comments.length > 0 && (
@@ -1247,6 +1334,7 @@ function App() {
               <p className="feed__meta feed__meta--filter">
                 <span>
                   Filtering <b>“{filter}”</b> · {filtered.length} {filtered.length === 1 ? "dispatch" : "dispatches"}
+                  {onAir ? ` · during ${onAir.title}` : ""}
                 </span>
                 <button
                   type="button"
@@ -1262,6 +1350,7 @@ function App() {
               replyShare > 0 && (
                 <p className="feed__meta">
                   {comments.length} dispatches · {replyShare}% rebuttals
+                  {hostStats && hostStats.share > 0 ? ` · ${hostStats.share}% to the host` : ""}
                 </p>
               )
             )}
@@ -1289,6 +1378,7 @@ function App() {
                     termsKey={termsKey}
                     filterLower={filterLower}
                     onTerm={toggleFilter}
+                    hostRe={host?.re ?? null}
                   />
                 ))}
               </ul>
