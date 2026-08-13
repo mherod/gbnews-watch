@@ -67,13 +67,28 @@ export function upstashRestRoomStore(baseUrl: string, token: string, key = KEY):
   };
 }
 
+/**
+ * The slice of Bun's RedisClient this store actually uses. A structural type
+ * so tests can hand `redisRoomStore` a recording fake — the real client is a
+ * TCP socket, and asserting the SET/EXAT command shape shouldn't need one.
+ */
+export type RedisLike = {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<unknown>;
+  send(command: string, args: string[]): Promise<unknown>;
+};
+
 /** Redis-over-TCP store using Bun's built-in client (supports rediss:// TLS). */
-export function redisRoomStore(url: string, key = KEY): RoomStore {
-  let client: import("bun").RedisClient | undefined;
+export function redisRoomStore(url: string, key = KEY, makeClient?: () => Promise<RedisLike>): RoomStore {
+  let client: RedisLike | undefined;
   const connect = async () => {
     if (!client) {
-      const { RedisClient } = await import("bun");
-      client = new RedisClient(url);
+      if (makeClient) {
+        client = await makeClient();
+      } else {
+        const { RedisClient } = await import("bun");
+        client = new RedisClient(url);
+      }
     }
     return client;
   };

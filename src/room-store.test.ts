@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import { fileRoomStore, resolveRoomStore, upstashRestRoomStore } from "./room-store";
+import {
+  fileRoomStore,
+  redisRoomStore,
+  resolveRoomStore,
+  upstashRestRoomStore,
+  type RedisLike,
+} from "./room-store";
 
 test("file store round-trips a snapshot and reports absence as null", async () => {
   const path = `${process.env.TMPDIR ?? "/tmp"}/room-store-test-${crypto.randomUUID()}.json`;
@@ -43,6 +49,67 @@ test("upstash REST store speaks the get/set protocol", async () => {
   } finally {
     await mock.stop(true);
   }
+});
+
+test("upstash save asks for EXAT only when given a deadline, in whole seconds rounded up", async () => {
+  // The mock records each set's query string — the regression this guards is
+  // the request shape (wrong param name, param sent unasked), not the response.
+  const exats: (string | null)[] = [];
+  const mock = Bun.serve({
+    port: 0,
+    async fetch(req) {
+      const parsed = new URL(req.url);
+      const [, op] = parsed.pathname.split("/");
+      if (op === "set") {
+        exats.push(parsed.searchParams.get("exat"));
+        return Response.json({ result: "OK" });
+      }
+      return Response.json({ error: "unknown op" }, { status: 400 });
+    },
+  });
+
+  try {
+    const store = upstashRestRoomStore(`http://localhost:${mock.port}`, "test-token");
+
+    await store.save("{}"); // no deadline → no EXAT at all
+    await store.save("{}", { expireAtMs: 1_755_000_000_000 }); // exact second boundary
+    await store.save("{}", { expireAtMs: 1_755_000_000_000 + 1500 }); // mid-second → next whole second
+
+    expect(exats).toEqual([null, "1755000000", "1755000002"]);
+  } finally {
+    await mock.stop(true);
+  }
+});
+
+test("redis save speaks SET/EXAT for a deadline and plain set without one", async () => {
+  // A recording fake behind the store's client seam: Bun's real RedisClient is
+  // a TCP socket, and what needs pinning is the command shape it would be sent.
+  const calls: unknown[][] = [];
+  const fake: RedisLike = {
+    async get(key) {
+      calls.push(["get", key]);
+      return "stored";
+    },
+    async set(key, value) {
+      calls.push(["set", key, value]);
+      return "OK";
+    },
+    async send(command, args) {
+      calls.push(["send", command, args]);
+      return "OK";
+    },
+  };
+  const store = redisRoomStore("redis://unused", "k", async () => fake);
+
+  expect(await store.load()).toBe("stored");
+  await store.save("snap");
+  await store.save("snap", { expireAtMs: 1_755_000_001_500 });
+
+  expect(calls).toEqual([
+    ["get", "k"],
+    ["set", "k", "snap"], // no deadline → plain SET, never a stray EXAT
+    ["send", "SET", ["k", "snap", "EXAT", "1755000002"]], // rounded up, unix seconds
+  ]);
 });
 
 test("resolution: Upstash REST wins, then TCP, then the dev file, then none", () => {
