@@ -493,15 +493,34 @@ function highlightBody(
 
   const nodes: ReactNode[] = [];
   let last = 0;
-  let key = 0;
   for (const s of chosen) {
     if (s.start > last) nodes.push(text.slice(last, s.start));
     if (s.kind === "trend" || s.kind === "filter") {
+      const isFilter = s.kind === "filter";
       nodes.push(
+        // Deliberately a <mark> with button semantics, not a <button>: a real
+        // button box can't fragment across a line break, so a phrase term near
+        // the line end would jump wholesale to the next line and tear a hole
+        // in the prose. The mark wraps like the text it highlights.
+        //
+        // Keyed by span position, not render order: the trend set shifts every
+        // few seconds and rebuilds this array, and an index key would replace
+        // the DOM node under keyboard focus mid-navigation. The position key
+        // also survives the trend→filter class flip on activation.
         <mark
-          key={key++}
-          className={s.kind === "filter" ? "hl hl--filter" : "hl"}
+          key={s.start}
+          className={isFilter ? "hl hl--filter" : "hl"}
+          role="button"
+          tabIndex={0}
+          aria-pressed={isFilter}
+          aria-label={isFilter ? `Clear filter “${s.text}”` : `Filter comments to “${s.text}”`}
           onClick={(e) => {
+            e.stopPropagation();
+            onTerm(s.text);
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault(); // Space must toggle the filter, not scroll the feed
             e.stopPropagation();
             onTerm(s.text);
           }}
@@ -511,7 +530,7 @@ function highlightBody(
       );
     } else {
       nodes.push(
-        <span key={key++} className={s.kind === "neg" ? "sent sent--neg" : "sent sent--pos"}>
+        <span key={s.start} className={s.kind === "neg" ? "sent sent--neg" : "sent sent--pos"}>
           {s.text}
         </span>,
       );

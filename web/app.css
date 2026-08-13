@@ -1049,6 +1049,13 @@ body {
   }
 }
 
+/* Marks are focusable buttons (role="button" in the markup). The global ring
+   applies; a tighter offset stops it grazing the lines above and below at
+   this line-height. */
+.hl:focus-visible {
+  outline-offset: 1px;
+}
+
 .hl--filter {
   background: color-mix(in srgb, var(--warn) 30%, transparent);
   font-weight: 600;
