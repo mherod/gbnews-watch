@@ -35,6 +35,14 @@
   box-sizing: border-box;
 }
 
+/* One focus language everywhere: the UA default ring is a squared halo that
+   sits awkwardly on pill-shaped controls. Outline follows border-radius, so
+   every chip, toggle and link gets a ring in its own silhouette. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 html {
   /* Stop Safari arbitrarily rescaling text after an orientation change.
      Pinch-zoom still works — this only pins the automatic adjustment. */
@@ -369,6 +377,24 @@ body {
      content — the chips row then widened the masthead instead of scrolling. */
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* Whichever edge still hides chips gets a fade, set from a scroll listener —
+   a hard-clipped chip reads as the end of the list, so more must look like
+   more. The scrollbar is already hidden, so the mask covers no affordance. */
+.trends__chips[data-fade-r="1"] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+
+.trends__chips[data-fade-l="1"] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px);
+  mask-image: linear-gradient(to right, transparent, #000 28px);
+}
+
+.trends__chips[data-fade-l="1"][data-fade-r="1"] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
 
 .trends__emoji {
@@ -1138,6 +1164,19 @@ body {
   color: var(--ink-faint);
 }
 
+/* The boot copy holds back for a beat: a snapshot usually arrives within
+   ~300ms, and an empty state that flashes first reads as a glitch. Delayed
+   appearance, not motion — it stays under reduced motion. */
+.waiting--boot {
+  animation: waiting-appear 0.3s ease 0.35s backwards;
+}
+
+@keyframes waiting-appear {
+  from {
+    opacity: 0;
+  }
+}
+
 .waiting__bars {
   display: inline-flex;
   gap: 4px;
@@ -1169,6 +1208,13 @@ body {
     transform: scaleY(1);
     opacity: 1;
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waiting__bars i {
+    animation: none;
+  }
+  /* The delayed appearance stays: it prevents a flash rather than adding one. */
 }
 
 @media (max-width: 560px) {

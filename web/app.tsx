@@ -622,6 +622,11 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm 
             className={`replyto${c.parentQuote ? " replyto--linked" : ""}`}
             onClick={scrollToParent}
             disabled={!c.parentQuote}
+            title={
+              c.parentQuote
+                ? "Jump to the original comment"
+                : "The original comment has scrolled out of the recent feed"
+            }
           >
             <span className="replyto__arrow">↳</span>
             <span className="replyto__name">{c.replyingTo}</span>
@@ -701,11 +706,47 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
   emoji: EmojiCount[];
 }) {
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
+  const chipsRef = useRef<HTMLDivElement>(null);
   const prevLeft = useRef(new Map<string, number>());
   const prevRank = useRef(new Map<string, number>());
   const [moves, setMoves] = useState<Record<string, "up" | "down">>({});
   // Identity of the current order — the effect only runs when it actually changes.
   const order = trends.map((t) => t.word).join("|");
+
+  // Edge fades on the scroller: a clipped chip with no cue reads as the end of
+  // the list, so mark whichever edges still hide content. Written straight to
+  // data attributes — scroll position isn't render state.
+  const updateFades = useCallback(() => {
+    const el = chipsRef.current;
+    if (!el) return;
+    const canScroll = el.scrollWidth - el.clientWidth > 1;
+    el.dataset.fadeL = canScroll && el.scrollLeft > 1 ? "1" : "";
+    el.dataset.fadeR = canScroll && el.scrollLeft < el.scrollWidth - el.clientWidth - 1 ? "1" : "";
+  }, []);
+
+  // Wired as a cleanup-returning callback ref, not a mount effect: the row
+  // renders null until the first trends land, so a mount effect finds no
+  // element and never retries. The ref runs at attach time, whenever that is.
+  const wireFades = useCallback((el: HTMLDivElement) => {
+    chipsRef.current = el;
+    let raf = 0;
+    const queue = () => {
+      if (!raf) raf = requestAnimationFrame(() => {
+        raf = 0;
+        updateFades();
+      });
+    };
+    updateFades();
+    el.addEventListener("scroll", queue, { passive: true });
+    const ro = new ResizeObserver(queue);
+    ro.observe(el);
+    return () => {
+      chipsRef.current = null;
+      el.removeEventListener("scroll", queue);
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+    };
+  }, [updateFades]);
 
   // FLIP: the chips have already been laid out at their new positions, so we
   // invert each one back to where it was and let it play forward. Movement is
@@ -739,7 +780,10 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
     prevRank.current = new Map(trends.map((t, i) => [t.word, i]));
 
     if (Object.keys(climbed).length > 0) setMoves(climbed);
-  }, [order]);
+    // Chips joining or leaving change the content width without resizing the
+    // container, which is the one case the ResizeObserver can't see.
+    updateFades();
+  }, [order, updateFades]);
 
   // Carets are a momentary signal, not a permanent badge — clear them.
   useEffect(() => {
@@ -755,7 +799,7 @@ function TrendBar({ trends, filter, onToggle, emoji }: {
     <div className="trends" aria-label="Trending words">
       <span className="trends__label">🔥 Trending</span>
       {allWeak && <span className="trends__quiet" title="No topic has caught on with more than one person yet">· quiet</span>}
-      <div className="trends__chips">
+      <div className="trends__chips" ref={wireFades}>
         {trends.map((t) => {
           const active = filter?.toLowerCase() === t.word.toLowerCase();
           const moved = moves[t.word];
@@ -903,10 +947,24 @@ function App() {
   }
 
   const trends = useTrends(comments, corpus, memoryRef);
-  const [filter, setFilter] = useState<string | null>(null);
+  // The filter arrives from the URL so a shared or reloaded link reopens the
+  // same slice of the room; every toggle is folded back into ?f= below.
+  const [filter, setFilter] = useState<string | null>(
+    () => new URLSearchParams(location.search).get("f"),
+  );
   const toggleFilter = useCallback((word: string) => {
     setFilter((cur) => (cur && cur.toLowerCase() === word.toLowerCase() ? null : word));
   }, []);
+
+  // replaceState, not pushState: chip toggles are rapid-fire, and a back
+  // button that unwinds twelve filters one by one would read as broken.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (filter) params.set("f", filter);
+    else params.delete("f");
+    const qs = params.toString();
+    history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
+  }, [filter]);
 
   // Terms to highlight inside comment bodies: the current trends (with their
   // alias-aware entity patterns) plus the active filter. termsKey is a stable
@@ -927,6 +985,16 @@ function App() {
     () => (filterLower ? trends.find((t) => t.word.toLowerCase() === filterLower)?.pattern : undefined),
     [trends, filterLower],
   );
+
+  // The tab strip is a surface too: name the slice being watched, else the
+  // programme being reacted to, so the tab is findable across a wall of tabs.
+  useEffect(() => {
+    document.title = filter
+      ? `“${filter}” — Have Your Say`
+      : onAir
+        ? `${onAir.title} — Have Your Say`
+        : "Have Your Say — live";
+  }, [filter, onAir?.title]);
 
   // Room mood — recompute when the comment set changes (not every second tick).
   const mood = useMemo(
@@ -1070,7 +1138,9 @@ function App() {
           </section>
         )}
         {comments.length === 0 ? (
-          <div className="waiting">
+          /* --boot delays its own appearance: a snapshot usually lands within
+             ~300ms, and an empty state that flashes first reads as a glitch. */
+          <div className="waiting waiting--boot">
             <div className="waiting__bars" aria-hidden="true">
               <i />
               <i />
