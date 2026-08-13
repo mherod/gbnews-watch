@@ -28,7 +28,6 @@ import {
 } from "../src/memory";
 import { Constellation } from "./constellation";
 import { AmbientBackdrop } from "./ambient-backdrop";
-import { LondonSkyline } from "./london-skyline";
 import { motion, AnimatePresence } from "framer-motion";
 
 /** How often the shared server-side memory is re-fetched. */
@@ -592,22 +591,12 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm 
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28, ease: "easeOut" }}
     >
-      <div className="comment__stamp" aria-hidden="true">
-        <div className="stamp-seal">
-          <span className="stamp-crown">👑</span>
-          <span className="stamp-text">{c.isTopComment ? "1ST" : "2ND"}</span>
-          <span className="stamp-sub">ROYAL MAIL</span>
-        </div>
-      </div>
       <div className="avatar" style={style} aria-hidden="true">
         {initials(c.author)}
       </div>
       <div className="comment__main">
         <div className="comment__head">
           <span className="comment__author">{c.author}</span>
-          <span className="street-plate" title="Registered London District">
-            SW1 · LONDON
-          </span>
           {c.chatty && (
             <span
               className="chatty"
@@ -904,31 +893,17 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
     : connected
       ? "status"
       : "status status--down";
-  const statusText = !connected ? "Disconnected" : stats.upstream === "live" ? "🔴 LIVE ON AIR" : "Connecting";
-
-  // Format London Big Ben time
-  const londonTime = new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZone: "Europe/London",
-  }).format(new Date(now));
+  const statusText = !connected ? "Disconnected" : stats.upstream === "live" ? "Live" : "Connecting";
 
   return (
     <header className="masthead">
       <div className="masthead__row">
         <div className="masthead__title">
-          <div className="roundel-badge">
-            <div className="roundel-badge__circle" />
-            <div className="roundel-badge__bar">
-              <span className="roundel-badge__text">HAVE YOUR SAY</span>
-            </div>
-          </div>
-          <p className="masthead__sub">
-            <span className="big-ben" title="Westminster London Time">
-              🕰️ <b>{londonTime}</b> <small>BST/GMT</small>
-            </span>
-            {" · "}
+          <h1>
+            Have Your Say
+          </h1>
+          <p>
+            Live broadcast from{" "}
             <a href="https://www.gbnews.com/watch/live" target="_blank" rel="noreferrer">
               gbnews.com/watch/live
             </a>
@@ -1158,7 +1133,6 @@ function App() {
   return (
     <>
       <AmbientBackdrop moodTone={mood?.tone} />
-      <LondonSkyline />
       <Header
         stats={stats}
         connected={connected}
