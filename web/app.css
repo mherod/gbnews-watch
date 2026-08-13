@@ -74,6 +74,40 @@ body {
   overscroll-behavior-y: contain;
 }
 
+/* ---------- Full-Bleed Union Jack Backdrop ---------- */
+.uj-backdrop-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.uj-backdrop-svg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100vw;
+  height: 100vh;
+  min-width: 100%;
+  min-height: 100%;
+  transform: translate(-50%, -50%);
+  opacity: 0.22;
+  filter: contrast(1.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  .uj-backdrop-svg {
+    opacity: 0.25;
+  }
+}
+
+.uj-backdrop-overlay {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 20%, transparent 15%, var(--bg) 90%);
+}
+
 .shell {
   max-width: 760px;
   margin: 0 auto;

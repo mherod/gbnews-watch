@@ -28,6 +28,7 @@ import {
 } from "../src/memory";
 import { Constellation } from "./constellation";
 import { UnionJack } from "./union-jack";
+import { UnionJackBackdrop } from "./union-jack-backdrop";
 import { motion, AnimatePresence } from "framer-motion";
 
 /** How often the shared server-side memory is re-fetched. */
@@ -1156,6 +1157,7 @@ function App() {
 
   return (
     <>
+      <UnionJackBackdrop />
       <Header
         stats={stats}
         connected={connected}
