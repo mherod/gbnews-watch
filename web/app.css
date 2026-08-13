@@ -1,37 +1,42 @@
 :root {
-  --bg: #f5f7fa;
+  /* Official UK Flag Institute Specifications */
+  --union-blue: #012169; /* Pantone 280 C */
+  --union-red: #c8102e; /* Pantone 186 C */
+  --union-white: #ffffff;
+
+  --bg: #f6f8fb;
   --panel: #ffffff;
-  --panel-2: #edf1f7;
-  --line: #dbe2ea;
-  --ink: #0d131f;
-  --ink-soft: #475569;
-  --ink-faint: #78889b;
-  --accent: #1d4ed8;
-  --accent-soft: #eff4ff;
-  --routemaster: #dc2626;
+  --panel-2: #edf2f8;
+  --line: #d6e0ea;
+  --ink: #0a1120;
+  --ink-soft: #42526e;
+  --ink-faint: #75869c;
+  --accent: #012169; /* Official Royal Navy Blue */
+  --accent-soft: #eef3ff;
+  --routemaster: #c8102e; /* Official Red */
   --live: #15803d;
   --warn: #b45309;
   --gold: #d97706;
-  --shadow: 0 1px 3px rgba(13, 19, 31, 0.06), 0 8px 24px rgba(13, 19, 31, 0.04);
+  --shadow: 0 1px 3px rgba(1, 33, 105, 0.07), 0 8px 24px rgba(1, 33, 105, 0.04);
   --radius: 12px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #090c13;
-    --panel: #111622;
-    --panel-2: #171f2f;
-    --line: #222c3d;
-    --ink: #ecf2f8;
-    --ink-soft: #9aa7b9;
-    --ink-faint: #606e82;
+    --bg: #060a14;
+    --panel: #0d1527;
+    --panel-2: #131e36;
+    --line: #1c2b48;
+    --ink: #f0f4fc;
+    --ink-soft: #9bb0ce;
+    --ink-faint: #627796;
     --accent: #3b82f6;
-    --accent-soft: #182235;
+    --accent-soft: #142240;
     --routemaster: #ef4444;
     --live: #22c55e;
     --warn: #f59e0b;
     --gold: #fbbf24;
-    --shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.55);
   }
 }
 

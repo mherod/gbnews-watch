@@ -28,6 +28,7 @@ import {
 } from "../src/memory";
 import { Constellation } from "./constellation";
 import { AmbientBackdrop } from "./ambient-backdrop";
+import { UnionJack } from "./union-jack";
 import { motion, AnimatePresence } from "framer-motion";
 
 /** How often the shared server-side memory is re-fetched. */
@@ -900,6 +901,7 @@ function Header({ stats, connected, arrivals, peak, now, trends, filter, onToggl
       <div className="masthead__row">
         <div className="masthead__title">
           <h1>
+            <UnionJack width={24} height={12} />
             Have Your Say
           </h1>
           <p>
