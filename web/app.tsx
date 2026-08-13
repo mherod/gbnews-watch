@@ -27,6 +27,8 @@ import {
   type TopicMemory,
 } from "../src/memory";
 import { Constellation } from "./constellation";
+import { AmbientBackdrop } from "./ambient-backdrop";
+import { motion, AnimatePresence } from "framer-motion";
 
 /** How often the shared server-side memory is re-fetched. */
 const ROOM_POLL_MS = 8_000;
@@ -581,7 +583,14 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm 
     : undefined;
 
   return (
-    <li id={`c-${c.uuid}`} className={`comment${isReply ? " comment--reply" : ""}`} style={liStyle}>
+    <motion.li
+      id={`c-${c.uuid}`}
+      className={`comment${isReply ? " comment--reply" : ""}`}
+      style={liStyle}
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: "easeOut" }}
+    >
       <div className="avatar" style={style} aria-hidden="true">
         {initials(c.author)}
       </div>
@@ -654,7 +663,7 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm 
           )}
         </div>
       </div>
-    </li>
+    </motion.li>
   );
 });
 
@@ -1123,6 +1132,7 @@ function App() {
 
   return (
     <>
+      <AmbientBackdrop moodTone={mood?.tone} />
       <Header
         stats={stats}
         connected={connected}
@@ -1154,7 +1164,18 @@ function App() {
                 {showRoom ? "Hide taproom" : "Show taproom"}
               </button>
             </div>
-            {showRoom && <Constellation graph={graph} filter={filter} onToggle={toggleFilter} />}
+            <AnimatePresence>
+              {showRoom && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.25, ease: "easeInOut" }}
+                >
+                  <Constellation graph={graph} filter={filter} onToggle={toggleFilter} />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </section>
         )}
         {comments.length === 0 ? (
