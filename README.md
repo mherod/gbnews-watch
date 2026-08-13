@@ -382,5 +382,6 @@ bun scripts/debug-upstash-roundtrip.ts
 ```
 
 Proves the Upstash REST wiring against the real service without touching the
-live room key: save → load → compare on a scratch key, then delete it. Nothing
-secret is printed.
+live room key: save → load → compare on a scratch key, then delete it.
+Credentials come from the environment, falling back to `.env.production.local`
+(from `vercel env pull`). Nothing secret is printed.
