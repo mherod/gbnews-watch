@@ -76,10 +76,12 @@ const massOf = (n: { mentions: number; voices: number }) => Math.max(n.mentions,
 
 const PULSE_MS = 1100;
 
-export function Constellation({ graph, filter, onToggle }: {
+export function Constellation({ graph, filter, onToggle, hostRe = null }: {
   graph: TopicGraph;
   filter: string | null;
   onToggle: (topic: string) => void;
+  /** Matches the on-air presenter — their node is the landlord of the board. */
+  hostRe?: RegExp | null;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -90,6 +92,8 @@ export function Constellation({ graph, filter, onToggle }: {
   const hoverRef = useRef<string | null>(null);
   const filterRef = useRef<string | null>(filter);
   filterRef.current = filter;
+  const hostReRef = useRef<RegExp | null>(hostRe);
+  hostReRef.current = hostRe;
 
   const [hasData, setHasData] = useState(false);
   // Re-run the data effect only when the graph's shape/values actually change.
@@ -331,14 +335,17 @@ export function Constellation({ graph, filter, onToggle }: {
         }
 
         // Solid heat-tinted disc with a thin white ring — the roundel
-        // silhouette with legible temperature.
+        // silhouette with legible temperature. The on-air presenter's node
+        // wears a gilt ring: the landlord of tonight's argument.
+        const isHost = hostReRef.current?.test(n.label) ?? false;
         ctx.globalAlpha = (n.weak ? 0.65 : 1) * dim;
         ctx.beginPath();
         ctx.arc(n.px, n.py, r, 0, Math.PI * 2);
         ctx.fillStyle = colour;
         ctx.fill();
-        ctx.lineWidth = isActive ? 3 : 2;
-        ctx.strokeStyle = isActive || isHovered ? "#C8102E" : `rgba(255, 255, 255, ${n.weak ? 0.4 : 0.85})`;
+        ctx.lineWidth = isActive ? 3 : isHost ? 2.5 : 2;
+        ctx.strokeStyle =
+          isActive || isHovered ? "#C8102E" : isHost ? "#F2B33D" : `rgba(255, 255, 255, ${n.weak ? 0.4 : 0.85})`;
         ctx.stroke();
 
         // Station-name pill below the disc, count folded in.
@@ -354,7 +361,7 @@ export function Constellation({ graph, filter, onToggle }: {
         ctx.globalAlpha = 0.92 * dim;
         roundRect(ctx, n.px - textW / 2 - 7, ty - 8, textW + 14, 17, 4);
         ctx.fill();
-        ctx.strokeStyle = isActive ? "#C8102E" : "rgba(255, 255, 255, 0.18)";
+        ctx.strokeStyle = isActive ? "#C8102E" : isHost ? "rgba(242, 179, 61, 0.5)" : "rgba(255, 255, 255, 0.18)";
         ctx.lineWidth = 1;
         roundRect(ctx, n.px - textW / 2 - 7, ty - 8, textW + 14, 17, 4);
         ctx.stroke();
