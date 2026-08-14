@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import {
   computeTrends,
+  isContentWord,
   mergeStickyTrends,
+  normalize,
   stripNonProse,
   termRegex,
   type StickyEntry,
@@ -214,6 +216,29 @@ test("sentence-adverb openers never trend as chips ('Sometimes' regression)", ()
   expect(trends.some((t) => t.word.toLowerCase().startsWith("sometime"))).toBe(false);
 });
 
+test("generic quantifiers never trend as topics ('another' regression)", () => {
+  // Observed live as a taproom node: "another · 4". Breadth across authors is
+  // exactly what a quantifier has and a topic needs — the word carries none.
+  const trends = computeTrends(fromMany("another one gone and another after that", 6), NOW);
+  expect(trends.some((t) => t.word.toLowerCase() === "another")).toBe(false);
+});
+
+test("the quantifier and indefinite-pronoun class is stopworded by stem", () => {
+  // One assertion per word so a future regression names the exact hole. "others"
+  // is checked through its stem, which is how isContentWord sees it.
+  for (const word of [
+    "another", "others", "other", "several", "few", "certain", "none", "both",
+    "each", "either", "neither", "plenty", "anyone", "everyone", "nobody",
+    "somebody", "everybody", "anybody", "someone",
+  ]) {
+    expect(isContentWord(normalize(word))).toBe(false);
+  }
+  // The guard rail: real topics in the same shape must still pass.
+  for (const word of ["council", "Labour", "boats", "Farage"]) {
+    expect(isContentWord(normalize(word))).toBe(true);
+  }
+});
+
 test("merges an overlapping proper-noun bigram and unigram into one topic", () => {
   const comments = [
     ...Array.from({ length: 8 }, (_, i) => c("Stadlen", { author: `u${i}` })),
@@ -278,13 +303,15 @@ test("collapses overlapping fragments of one repeated sentence into a single top
 });
 
 test("flags single-voice filler weak but leaves real trends unmarked", () => {
+  // "Allotment" is filler by breadth (one voice), not by vocabulary — the
+  // point of the test. An indefinite pronoun would now be stopworded instead.
   const trends = computeTrends(
-    [...fromMany("immigration", 3), c("Nobody", { author: "z" })],
+    [...fromMany("immigration", 3), c("Allotment", { author: "z" })],
     NOW,
     { minTrends: 3 },
   );
   expect(trends.find((t) => t.word.toLowerCase() === "immigration")?.weak).toBeFalsy();
-  expect(trends.find((t) => t.word.toLowerCase() === "nobody")?.weak).toBe(true);
+  expect(trends.find((t) => t.word.toLowerCase() === "allotment")?.weak).toBe(true);
 });
 
 test("a term repeated by one person is filler, not a real trend", () => {

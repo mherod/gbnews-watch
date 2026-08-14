@@ -13,6 +13,11 @@ export const STOPWORDS = new Set(
     + "will would can could should shall may might must of to in on at by for with "
     + "from into over under out up down off about as so not no yes just like get got "
     + "one two all any some more most much many very too also even still now then when only "
+    // Quantifiers, determiners and indefinite pronouns: breadth without a topic.
+    // Stems only ("others" normalizes to "other"), since isContentWord tests the
+    // stem — the hole "sometimes" slipped through.
+    + "another other several few certain none both each either neither plenty "
+    + "anyone everyone nobody somebody everybody anybody "
     + "what who whom which why how where whose because while after before again once "
     + "he's she's it's i'm you're they're we're don't didn't doesn't isn't aren't wasn't "
     + "can't won't wouldn't couldn't shouldn't he'd she'd they'd i've you've we've "
