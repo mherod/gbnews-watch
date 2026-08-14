@@ -1092,7 +1092,9 @@ function App() {
   }, [presenterKey]);
 
   // How the room is taking the host: share of recent dispatches that mention
-  // them, and the mood across just those dispatches.
+  // them, and the mood across just those dispatches. The verdict gets the same
+  // hysteresis as the room pill — declared here so it precedes its use.
+  const hostToneRef = useRef<Mood["tone"] | undefined>(undefined);
   const hostStats = useMemo(() => {
     if (!host || !onAir || comments.length === 0) return null;
     // Only dispatches posted since this programme began count against this
@@ -1104,7 +1106,13 @@ function App() {
     if (during.length === 0) return null;
     const mentioning = during.filter((c) => host.re.test(c.body));
     const share = Math.round((mentioning.length / during.length) * 100);
-    return { share, mood: roomMood(mentioning, Date.now(), { windowMs: 600_000, minScored: 3 }) };
+    const mood = roomMood(mentioning, Date.now(), {
+      windowMs: 600_000,
+      minScored: 3,
+      previousTone: hostToneRef.current,
+    });
+    if (mood) hostToneRef.current = mood.tone;
+    return { share, mood };
   }, [comments, host, onAir]);
 
   // Handovers observed while this tab was open — each becomes an
@@ -1232,10 +1240,18 @@ function App() {
   }, [filter, onAir?.title]);
 
   // Room mood — recompute when the comment set changes (not every second tick).
-  const mood = useMemo(
-    () => roomMood(comments, Date.now(), { windowMs: 300_000, minScored: 4 }),
-    [comments],
-  );
+  // The last tone shown is fed back in so a balance hovering on a boundary
+  // holds its label instead of flapping between two readings.
+  const moodToneRef = useRef<Mood["tone"] | undefined>(undefined);
+  const mood = useMemo(() => {
+    const next = roomMood(comments, Date.now(), {
+      windowMs: 300_000,
+      minScored: 4,
+      previousTone: moodToneRef.current,
+    });
+    if (next) moodToneRef.current = next.tone;
+    return next;
+  }, [comments]);
   const emoji = useMemo(() => topEmoji(comments, Date.now(), { limit: 3 }), [comments]);
   const [showRoom, setShowRoom] = useState(true);
 

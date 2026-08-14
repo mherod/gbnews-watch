@@ -128,28 +128,83 @@ export function scoreText(text: string): number | null {
   return hits === 0 ? null : sum / hits;
 }
 
+/** The negative-fraction band each tone owns, matching the thresholds below. */
+const TONE_BAND: Record<Mood["tone"], { min: number; max: number }> = {
+  buzzing: { min: 0, max: 0.28 },
+  warm: { min: 0.28, max: 0.44 },
+  mixed: { min: 0.44, max: 0.56 },
+  grumbly: { min: 0.56, max: 0.72 },
+  heated: { min: 0.72, max: 1 },
+};
+
+const TONE_FACE: Record<Mood["tone"], { label: string; emoji: string }> = {
+  buzzing: { label: "Proper Chuffed", emoji: "🎉" },
+  warm: { label: "Not Bad, Actually", emoji: "☕" },
+  mixed: { label: "Divided", emoji: "⚖️" },
+  grumbly: { label: "A Bit Miffed", emoji: "😤" },
+  heated: { label: "Proper Fuming", emoji: "😡" },
+};
+
+/**
+ * How far past its boundary the balance must move before the room is relabelled.
+ * A live feed hovers on a threshold and the pill flips back and forth every few
+ * seconds — observed flapping Divided → Not Bad, Actually → Divided inside five
+ * minutes. Holding the previous tone across a small overshoot keeps the read
+ * calm without ever hiding a real swing.
+ */
+const TONE_MARGIN = 0.04;
+
+/** The band the balance falls in, ignoring any history. */
+function toneOf(nf: number): Mood["tone"] {
+  if (nf >= 0.72) return "heated";
+  if (nf >= 0.56) return "grumbly";
+  if (nf <= 0.28) return "buzzing";
+  if (nf <= 0.44) return "warm";
+  return "mixed";
+}
+
 /**
  * Classifies by the *balance* of angry vs happy comments, not the mean — a mean
  * collapses a heated-but-mixed room to "neutral". Leans to a side readily, and
  * only calls it "Divided" when the split is genuinely close, spelling out the mix.
+ *
+ * Pass the previously shown tone for hysteresis: the room keeps that label until
+ * the balance leaves its band by TONE_MARGIN, so a reading that grazes a
+ * boundary doesn't flip the pill. Omit it for the plain, memoryless read.
  */
-function classify(neg: number, pos: number): Pick<Mood, "label" | "emoji" | "tone" | "detail"> {
+export function classify(
+  neg: number,
+  pos: number,
+  previousTone?: Mood["tone"],
+): Pick<Mood, "label" | "emoji" | "tone" | "detail"> {
   const total = neg + pos;
   if (total === 0) return { label: "Fair Enough", emoji: "☕", tone: "mixed" };
   const nf = neg / total;
-  if (nf >= 0.72) return { label: "Proper Fuming", emoji: "😡", tone: "heated" };
-  if (nf >= 0.56) return { label: "A Bit Miffed", emoji: "😤", tone: "grumbly" };
-  if (nf <= 0.28) return { label: "Proper Chuffed", emoji: "🎉", tone: "buzzing" };
-  if (nf <= 0.44) return { label: "Not Bad, Actually", emoji: "☕", tone: "warm" };
+
+  let tone = toneOf(nf);
+  if (previousTone !== undefined && previousTone !== tone) {
+    // Still inside the old band's widened edges — the swing isn't decisive yet.
+    const band = TONE_BAND[previousTone];
+    if (nf >= band.min - TONE_MARGIN && nf <= band.max + TONE_MARGIN) tone = previousTone;
+  }
+
+  const face = TONE_FACE[tone];
+  if (tone !== "mixed") return { ...face, tone };
+  // The mix is always spelled out from the real balance, even when the label is
+  // being held — "Divided 58% 😤" is honest about which way it's drifting.
   const negPct = Math.round(nf * 100);
-  return { label: "Divided", emoji: "⚖️", tone: "mixed", detail: `${negPct}% 😤 · ${100 - negPct}% ☕` };
+  return { ...face, tone, detail: `${negPct}% 😤 · ${100 - negPct}% ☕` };
 }
 
-/** Reads the room by the balance of positive vs negative comments. */
+/**
+ * Reads the room by the balance of positive vs negative comments. Pass
+ * `previousTone` (the tone last shown) to keep the label steady across a
+ * boundary graze — see `classify`.
+ */
 export function roomMood(
   comments: readonly { body: string; postedAt: string }[],
   now: number,
-  opts: { windowMs?: number; minScored?: number } = {},
+  opts: { windowMs?: number; minScored?: number; previousTone?: Mood["tone"] } = {},
 ): Mood | null {
   const windowMs = opts.windowMs ?? 300_000;
   const minScored = opts.minScored ?? 4;
@@ -174,6 +229,6 @@ export function roomMood(
     count,
     negFrac: neg / denom,
     posFrac: pos / denom,
-    ...classify(neg, pos),
+    ...classify(neg, pos, opts.previousTone),
   };
 }
