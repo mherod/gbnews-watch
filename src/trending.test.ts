@@ -173,17 +173,45 @@ test("folds singular and plural into one trend", () => {
 
 test("boosts a proper noun over a generic word of equal breadth", () => {
   // Pinfold is deliberately NOT in the entity corpus — this exercises the
-  // generic capitalisation boost, not the entity fast-path.
+  // generic capitalisation boost, not the entity fast-path. Mid-sentence
+  // position, because a sentence-initial capital carries no signal.
+  // Neighbouring words vary per author so no bigram forms and absorbs the name.
   const trends = computeTrends(
     [
-      c("Pinfold", { author: "a" }),
-      c("Pinfold", { author: "b" }),
-      c("reckon", { author: "c" }),
-      c("reckon", { author: "d" }),
+      c("blame Pinfold", { author: "a" }),
+      c("ask Pinfold", { author: "b" }),
+      c("folk reckon", { author: "c" }),
+      c("all reckon", { author: "d" }),
     ],
     NOW,
   );
   expect(trends[0]?.word.toLowerCase()).toBe("pinfold");
+});
+
+test("a sentence-initial capital earns no proper-noun boost", () => {
+  // "Apparently" opens every comment Capitalised — obligatory English, not a
+  // name. At equal breadth the mid-sentence capitalised name must outrank it.
+  // Only the word under test repeats; varied neighbours keep phrases out.
+  const trends = computeTrends(
+    [
+      c("Apparently nobody checked", { author: "a" }),
+      c("Apparently that broke", { author: "b" }),
+      c("blame Pinfold today", { author: "d" }),
+      c("ask Pinfold nicely", { author: "e" }),
+    ],
+    NOW,
+  );
+  const words = trends.map((t) => t.word.toLowerCase());
+  expect(words).toContain("pinfold");
+  expect(words).toContain("apparently");
+  expect(words.indexOf("pinfold")).toBeLessThan(words.indexOf("apparently"));
+});
+
+test("sentence-adverb openers never trend as chips ('Sometimes' regression)", () => {
+  // The observed defect: "Sometimes …" openers earned a chip and a taproom
+  // node. It is a stopword now, whatever its capitalisation or breadth.
+  const trends = computeTrends(fromMany("Sometimes I wonder about the council", 6), NOW);
+  expect(trends.some((t) => t.word.toLowerCase().startsWith("sometime"))).toBe(false);
 });
 
 test("merges an overlapping proper-noun bigram and unigram into one topic", () => {

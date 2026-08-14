@@ -20,7 +20,7 @@ export const STOPWORDS = new Set(
     + "back way well own see look come came around really actually something someone "
     + "everything nothing anything please thanks thank yeah okay gonna wanna every always "
     + "never ever mean means give gives took take time long lot bit sure today tonight "
-    + "probably maybe quite pretty correct wrong agree agreed done says told tell let lets "
+    + "probably maybe sometimes sometime quite pretty correct wrong agree agreed done says told tell let lets "
     + "stand put keep keeps got getting "
     // contraction stems left behind when a non-standard apostrophe splits the word
     + "doesn don didn isn aren wasn weren won wouldn couldn shouldn haven hasn hadn ain mustn "
@@ -117,6 +117,19 @@ export function normalize(word: string): string {
 export function isCapitalized(word: string): boolean {
   const first = word[0];
   return first !== undefined && first !== first.toLowerCase() && word !== word.toUpperCase();
+}
+
+/**
+ * True when the match at `index` opens the comment or follows end-of-sentence
+ * punctuation (closing quotes/brackets skipped). English capitalises there
+ * regardless of noun-ness, so the position carries no proper-noun signal —
+ * "Sometimes I wonder…" must not read as a name the way "blame Pinfold" does.
+ */
+export function isSentenceInitial(text: string, index: number): boolean {
+  let i = index - 1;
+  while (i >= 0 && /[\s"'""''()\[\]]/.test(text[i]!)) i--;
+  if (i < 0) return true;
+  return /[.!?…\n]/.test(text[i]!);
 }
 
 export const isContentWord = (stem: string) =>
@@ -279,13 +292,15 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     for (const canonical of seenEnt) record(ent, canonical, canonical, { isRecent, author, weight, cap: true });
 
     // Collect each unique stem once per comment, remembering a display spelling
-    // and whether it showed up capitalised anywhere in this comment.
+    // and whether it showed up capitalised in an *informative* position — a
+    // sentence-initial capital is obligatory English, not a proper-noun hint,
+    // so "Apparently"/"Sometimes" openers earn nothing here.
     const seenUni = new Map<string, { display: string; cap: boolean }>();
     for (let mi = 0; mi < matches.length; mi++) {
       if (entIdx.has(mi)) continue; // already claimed by an entity
       const stem = normalize(tokens[mi]!);
       if (!isContentWord(stem) || isBoilerplate(stem)) continue;
-      const cap = isCapitalized(tokens[mi]!);
+      const cap = isCapitalized(tokens[mi]!) && !isSentenceInitial(cleanBody, matches[mi]!.index!);
       const prev = seenUni.get(stem);
       if (!prev) seenUni.set(stem, { display: tokens[mi]!, cap });
       else if (cap) prev.cap = true;
