@@ -171,9 +171,29 @@ export function Constellation({ graph, filter, onToggle, hostRe = null }: {
     };
     const nodeRadius = (n: Node) => radius(massOf(n)) * sizeFactor();
 
+    /**
+     * How tangled the board currently looks, 0 (airy) → 1 (hairball). Driven by
+     * how many label pills are sitting on top of each other, which is the thing
+     * that actually makes a busy night unreadable.
+     */
+    let tangle = 0;
+
+    /**
+     * How far a tether has been let out at the current tangle: 0 taut, 1 slack.
+     * The flimsiest links give first — a pair argued over once shouldn't hold a
+     * topic inside the crowd — while anything argued over four times or more
+     * keeps its full pull, so real associations never come apart.
+     */
+    const slackOf = (weight: number, t: number) => t * Math.max(0, 1 - (weight - 1) / 3);
+
+    const linkDistance = (l: Link) => (165 - Math.min(60, l.weight * 16)) * sizeFactor() * (1 + 0.7 * tangle);
+    const linkStrength = (l: Link) =>
+      Math.min(0.9, 0.3 + l.weight * 0.12) * (1 - slackOf(l.weight, tangle));
+    const chargeStrength = (d: Node) => (-240 - nodeRadius(d) * 12) * sizeFactor() * (1 + 1.1 * tangle);
+
     const sim = forceSimulation<Node, Link>([])
-      .force("link", forceLink<Node, Link>([]).id((d) => d.id).distance((l) => (165 - Math.min(60, l.weight * 16)) * sizeFactor()).strength((l) => Math.min(0.9, 0.3 + l.weight * 0.12)))
-      .force("charge", forceManyBody<Node>().strength((d) => (-240 - nodeRadius(d) * 12) * sizeFactor()))
+      .force("link", forceLink<Node, Link>([]).id((d) => d.id).distance(linkDistance).strength(linkStrength))
+      .force("charge", forceManyBody<Node>().strength(chargeStrength))
       .force("collide", forceCollide<Node>().radius((d) => {
         const sf = sizeFactor();
         // The label pill below each disc is usually wider than the disc; give
@@ -186,6 +206,23 @@ export function Constellation({ graph, filter, onToggle, hostRe = null }: {
       .force("y", forceY<Node>().strength(0.065))
       .stop();
     simRef.current = sim;
+
+    /**
+     * Push the current tangle into the forces. d3 reads these accessors when a
+     * force initialises, not every tick, so the setters are re-invoked to make
+     * a new reading take. Called only when the tangle has actually moved.
+     */
+    const applyTangle = () => {
+      const link = sim.force("link") as ReturnType<typeof forceLink<Node, Link>>;
+      link.distance(linkDistance).strength(linkStrength);
+      (sim.force("charge") as ReturnType<typeof forceManyBody<Node>>).strength(chargeStrength);
+      // The centring pull is what packs a busy board into one lump; easing it
+      // off is what lets a released cluster drift away and become its own branch.
+      const { w, h } = sizeRef.current;
+      const ease = 1 - 0.8 * tangle;
+      sim.force("x", forceX<Node>(w / 2).strength(0.045 * ease));
+      sim.force("y", forceY<Node>(h / 2).strength(0.06 * ease));
+    };
 
     // The data effect runs before this one on mount, so adopt whatever it staged.
     const seeded = [...nodesRef.current.values()];
@@ -207,8 +244,7 @@ export function Constellation({ graph, filter, onToggle, hostRe = null }: {
       canvas.style.height = `${rect.height}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       sim.force("center", forceCenter(rect.width / 2, rect.height / 2));
-      sim.force("x", forceX<Node>(rect.width / 2).strength(0.045));
-      sim.force("y", forceY<Node>(rect.height / 2).strength(0.06));
+      applyTangle(); // owns the x/y pull, so the relaxation survives a resize
       sim.alpha(0.5);
     };
     const ro = new ResizeObserver(resize);
@@ -246,12 +282,14 @@ export function Constellation({ graph, filter, onToggle, hostRe = null }: {
       // often wider than the circle — inside the canvas. Clamping to the radius
       // alone still left names like "pull factors" clipped at a phone width.
       // The extra bottom margin clears the label pill drawn below each disc.
+      const pills: { x: number; y: number; hw: number }[] = [];
       for (const n of nodes) {
         if (n.x == null || n.y == null) continue;
         const r = nodeRadius(n) + 4;
         ctx.font = labelFont(n, r);
         // Pill extends half the text plus 7px padding; wobble adds ~1.2px.
         const halfLabel = ctx.measureText(labelOf(n, w)).width / 2 + 9;
+        pills.push({ x: n.x, y: n.y + r + 13, hw: halfLabel });
         const padX = Math.min(Math.max(r, halfLabel), w / 2);
         n.x = Math.min(Math.max(n.x, padX), Math.max(padX, w - padX));
         n.y = Math.min(Math.max(n.y, r), Math.max(r, h - r - 30));
@@ -268,6 +306,31 @@ export function Constellation({ graph, filter, onToggle, hostRe = null }: {
         n.px = n.x + Math.sin(now * 0.00042 + n.drift) * wobble;
         n.py = n.y + Math.cos(now * 0.00037 + n.drift * 1.7) * wobble;
       }
+      // --- How tangled is it? Count the bodies whose labels are sitting on top
+      // of another one; that share is the tangle the forces respond to. ---
+      const crowded = new Set<number>();
+      for (let i = 0; i < pills.length; i++) {
+        for (let j = i + 1; j < pills.length; j++) {
+          const p = pills[i]!;
+          const q = pills[j]!;
+          if (Math.abs(p.x - q.x) < p.hw + q.hw && Math.abs(p.y - q.y) < 17) {
+            crowded.add(i);
+            crowded.add(j);
+          }
+        }
+      }
+      const target = pills.length > 0 ? crowded.size / pills.length : 0;
+      // Asymmetric easing, and the slow side matters: relaxing *removes* the
+      // overlaps that asked for it, so a symmetric return would re-tighten, tangle
+      // again, and leave the board breathing in and out. Loosen over a second or
+      // so, take the better part of a minute to draw back in.
+      const prev = tangle;
+      tangle += (target - tangle) * (target > tangle ? 0.04 : 0.004);
+      if (Math.abs(tangle - prev) > 0.002) {
+        applyTangle();
+        if (sim.alpha() < 0.06) sim.alpha(0.12); // enough heat to actually move
+      }
+
       const active = filterRef.current?.toLowerCase() ?? null;
       const hover = hoverRef.current;
 
@@ -291,8 +354,11 @@ export function Constellation({ graph, filter, onToggle, hostRe = null }: {
         const cx = mx + (-dy / len) * len * 0.08;
         const cy = my + (dx / len) * len * 0.08;
 
+        // A tether the physics has let go of shouldn't still look like it's
+        // holding the board together — it fades as it goes slack.
+        const slack = slackOf(l.weight, tangle);
         ctx.strokeStyle = lit ? "#C8102E" : "rgba(255, 255, 255, 0.16)";
-        ctx.globalAlpha = muted ? 0.06 : lit ? 0.9 : 1;
+        ctx.globalAlpha = (muted ? 0.06 : lit ? 0.9 : 1) * (1 - 0.75 * slack);
         ctx.lineWidth = lit ? 3 : Math.min(3, 1.2 + l.weight * 0.5);
         ctx.lineCap = "round";
         ctx.beginPath();
