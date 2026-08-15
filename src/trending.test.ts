@@ -209,6 +209,67 @@ test("a sentence-initial capital earns no proper-noun boost", () => {
   expect(words.indexOf("pinfold")).toBeLessThan(words.indexOf("apparently"));
 });
 
+// --- written numbers match their digit forms --------------------------------
+
+test("a written number and its digit form are one topic", () => {
+  // The observed split: "Saturday Five" trending while "SATURDAY 5" sat
+  // unmatched in the next card.
+  const trends = computeTrends(
+    [
+      ...fromMany("the Saturday Five is just slop", 3),
+      ...Array.from({ length: 3 }, (_, i) => c("SATURDAY 5 DOING A GREAT JOB", { author: `d${i}` })),
+    ],
+    NOW,
+  );
+  const hits = trends.filter((t) => /saturday/i.test(t.word));
+  expect(hits).toHaveLength(1); // one show, one chip
+  expect(hits[0]!.recent).toBeGreaterThanOrEqual(6); // both spellings counted
+  // The chip's matcher lights up and filters both spellings.
+  const re = termRegex(hits[0]!.word, hits[0]!.pattern);
+  expect(re.test("the Saturday Five is just slop")).toBe(true);
+  expect(re.test("SATURDAY 5 DOING A GREAT JOB")).toBe(true);
+});
+
+test("bare digits and years still never trend", () => {
+  const trends = computeTrends(fromMany("2024 was 100 percent worse", 6), NOW);
+  expect(trends.some((t) => /^\d+$/.test(t.word))).toBe(false);
+});
+
+test("one and two stay stopwords rather than becoming digits", () => {
+  const trends = computeTrends(fromMany("one thing or two things", 6), NOW);
+  expect(trends.some((t) => /^(one|two|1|2)$/i.test(t.word))).toBe(false);
+});
+
+test("an ordinal never mints a phantom digit topic", () => {
+  // "5th" is one ordinal, not a bare "5" plus a stray "th" — a split there
+  // would pair the digit with its neighbour into an unmatchable "saturday 5".
+  const trends = computeTrends(fromMany("the Saturday 5th protest looms", 6), NOW);
+  expect(trends.some((t) => /\b5\b/.test(t.word))).toBe(false);
+});
+
+test("a folded number key still matches its written display form ('Rugby Sevens')", () => {
+  // Every observed spelling is the written one; the key still folds to
+  // "rugby 7" and the chip's matcher must cover both directions.
+  const trends = computeTrends(fromMany("the Rugby Sevens again", 6), NOW);
+  const hit = trends.find((t) => /rugby/i.test(t.word));
+  expect(hit).toBeDefined();
+  const re = termRegex(hit!.word, hit!.pattern);
+  expect(re.test("the Rugby Sevens again")).toBe(true);
+  expect(re.test("rugby 7 highlights")).toBe(true);
+});
+
+test("a spelling flip between ticks never doubles the chip", () => {
+  const sticky = new Map<string, StickyEntry>();
+  const t0 = 1_000_000;
+  mergeStickyTrends([trend("Saturday Five", 8)], sticky, t0, { stickyMs: 180_000 });
+  // Next tick the detector's best form is the digit spelling of the same show:
+  // the sticky slot must roll over, not linger beside the fresh chip.
+  const next = mergeStickyTrends([trend("SATURDAY 5", 9)], sticky, t0 + 30_000, { stickyMs: 180_000 });
+  const words = next.map((t) => t.word.toLowerCase());
+  expect(words).toContain("saturday 5");
+  expect(words).not.toContain("saturday five");
+});
+
 test("sentence-adverb openers never trend as chips ('Sometimes' regression)", () => {
   // The observed defect: "Sometimes …" openers earned a chip and a taproom
   // node. It is a stopword now, whatever its capitalisation or breadth.

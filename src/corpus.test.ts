@@ -36,6 +36,22 @@ test("a lone sentence-case first word is not treated as a name", () => {
   expect(corpus.stems.has("simple")).toBe(true); // but it still counts as vocabulary
 });
 
+test("a digit inside a name run survives into stems and phrases", () => {
+  const corpus = buildCorpus(["Saturday 5 lineup revealed"]);
+  expect(corpus.phrases.has("saturday 5")).toBe(true);
+  expect(corpus.stems.has("5")).toBe(true); // per-word phrase boost needs it
+});
+
+test("a written-number headline lands on the same digit phrase key", () => {
+  const corpus = buildCorpus(["Saturday Five returns tonight"]);
+  expect(corpus.phrases.has("saturday 5")).toBe(true); // "Five" stems to "5" and survives the gate
+});
+
+test("a run of bare digits is a score, not a name", () => {
+  const corpus = buildCorpus(["24 7 moaning continues"]);
+  expect(corpus.phrases.size).toBe(0); // no capitalised word anchors the run
+});
+
 test("round-trips through JSON and shrugs off junk", () => {
   const corpus = buildCorpus(parseRssTitles(FEED));
   const back = corpusFromJson(corpusToJson(corpus));

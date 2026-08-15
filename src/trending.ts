@@ -73,7 +73,51 @@ export function termRegex(term: string, pattern?: string): RegExp {
   return new RegExp(`\\b(?:${source})\\b`, "i");
 }
 
-const TOKEN = /[\p{L}][\p{L}\p{N}'']*/gu;
+// Digit runs are tokens too: without them "Saturday 5" tokenises as just
+// ["Saturday"], so it could never match "Saturday Five" — and the corpus's
+// "channel 4" alias could never fire at all. Only *standalone* runs, though:
+// "5th"/"5pm"/"70s" must not shed a bare "5" that mints a phantom "Saturday 5"
+// trend whose own matcher can't find it in the source text.
+const TOKEN = /[\p{L}][\p{L}\p{N}'']*|(?<![\p{L}\p{N}])\p{N}+(?![\p{L}\p{N}])/gu;
+
+/**
+ * Written numbers folded to digits for *comparison* — "Saturday Five" and
+ * "SATURDAY 5" are one topic. Deliberately three–twenty only: "one"/"two" are
+ * stopwords (and would stop being if their stems became digits), and "zero"
+ * belongs to Net Zero.
+ */
+const NUMBER_WORDS: Record<string, string> = {
+  three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9",
+  ten: "10", eleven: "11", twelve: "12", thirteen: "13", fourteen: "14",
+  fifteen: "15", sixteen: "16", seventeen: "17", eighteen: "18", nineteen: "19",
+  twenty: "20",
+};
+
+const DIGIT_WORDS: Record<string, string> = Object.fromEntries(
+  Object.entries(NUMBER_WORDS).map(([w, d]) => [d, w]),
+);
+
+/** Matches the digit runs `normalize` can produce from phrase stems. */
+const PURE_DIGITS = /^\p{N}{1,4}$/u;
+
+/**
+ * Highlight/filter pattern for a phrase whose key contains a folded number, so
+ * the "Saturday 5" chip lights up "Saturday Five" and "SATURDAY 5" alike.
+ * Undefined when no number is involved — ordinary trends keep the cheap
+ * match-own-word path.
+ */
+export function numberAwarePattern(key: string, display?: string): string | undefined {
+  const words = key.split(" ");
+  if (!words.some((w) => DIGIT_WORDS[w] !== undefined)) return undefined;
+  const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const fromStems = words
+    .map((w) => (DIGIT_WORDS[w] !== undefined ? `(?:${w}|${DIGIT_WORDS[w]}s?)` : esc(w)))
+    .join("\\s+");
+  // The chip must always match its own display spelling — the key holds stems,
+  // and "Rugby Sevens" would otherwise show a count its filter can't reproduce.
+  if (display && display.toLowerCase() !== key) return `${fromStems}|${esc(display)}`;
+  return fromStems;
+}
 
 const URL_OR_NON_PROSE: RegExp[] = [
   // Full http/https URLs with query params/fragments
@@ -112,10 +156,12 @@ export function stripNonProse(body: string): string {
  */
 export function normalize(word: string): string {
   const s = word.toLowerCase().replace(/['']s$/, "");
-  if (s.length > 4 && s.endsWith("ies")) return `${s.slice(0, -3)}y`;
-  if (s.length > 4 && /(?:s|x|z|ch|sh)es$/.test(s)) return s.slice(0, -2);
-  if (s.length > 3 && s.endsWith("s") && !/(?:ss|us|is)$/.test(s)) return s.slice(0, -1);
-  return s;
+  let stem = s;
+  if (s.length > 4 && s.endsWith("ies")) stem = `${s.slice(0, -3)}y`;
+  else if (s.length > 4 && /(?:s|x|z|ch|sh)es$/.test(s)) stem = s.slice(0, -2);
+  else if (s.length > 3 && s.endsWith("s") && !/(?:ss|us|is)$/.test(s)) stem = s.slice(0, -1);
+  // Number fold last, so "fives" stems to "five" and lands on "5".
+  return NUMBER_WORDS[stem] ?? stem;
 }
 
 /** Capitalised but not SHOUTING — a rough proper-noun signal (names, places). */
@@ -139,6 +185,14 @@ export function isSentenceInitial(text: string, index: number): boolean {
 
 export const isContentWord = (stem: string) =>
   stem.length >= 3 && !STOPWORDS.has(stem) && !BOILERPLATE_STEMS.has(stem) && !/\d/.test(stem);
+
+/**
+ * A word allowed *inside* a phrase: a content word, or a short digit run so
+ * "Saturday 5" can form. Digits still can't trend alone (isContentWord rejects
+ * them, so years and counts stay out), and every phrase must contain at least
+ * one true content word — checked at the call sites.
+ */
+export const isPhrasePart = (stem: string) => isContentWord(stem) || PURE_DIGITS.test(stem);
 const bestForm = (forms: Map<string, number>) =>
   [...forms].sort((a, b) => b[1] - a[1])[0]?.[0];
 
@@ -323,15 +377,22 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       if (!/^\s+$/.test(gap)) continue;
       const a = normalize(cur[0]);
       const b = normalize(next[0]);
-      if (!isContentWord(a) || !isContentWord(b) || isBoilerplate(a) || isBoilerplate(b)) continue;
+      if (!isPhrasePart(a) || !isPhrasePart(b) || isBoilerplate(a) || isBoilerplate(b)) continue;
+      if (!isContentWord(a) && !isContentWord(b)) continue; // "5 6" is not a topic
       const key = `${a} ${b}`;
       if (seenBi.has(key)) continue;
       seenBi.add(key);
+      // Digits are neutral in a name pair, matching the trigram rule — but a
+      // pair still needs at least one genuinely capitalised word to read as a
+      // name, or "5 6" chatter would earn the proper-noun boost.
+      const capNeutral = (w: string) => isCapitalized(w) || PURE_DIGITS.test(w);
       record(bi, key, `${cur[0]} ${next[0]}`, {
         isRecent,
         author,
         weight,
-        cap: isCapitalized(cur[0]) && isCapitalized(next[0]),
+        cap:
+          capNeutral(cur[0]) && capNeutral(next[0]) &&
+          (isCapitalized(cur[0]) || isCapitalized(next[0])),
       });
     }
 
@@ -349,11 +410,14 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       const g1 = cleanBody.slice(t0.index! + t0[0].length, t1.index!);
       const g2 = cleanBody.slice(t1.index! + t1[0].length, t2.index!);
       if (!/^\s+$/.test(g1) || !/^\s+$/.test(g2)) continue;
-      if (!isCapitalized(t0[0]) || !isCapitalized(t1[0]) || !isCapitalized(t2[0])) continue;
+      // A digit token is neutral in a name run — "Radio 5 Live" is one name.
+      const capOrDigit = (w: string) => isCapitalized(w) || PURE_DIGITS.test(w);
+      if (!capOrDigit(t0[0]) || !capOrDigit(t1[0]) || !capOrDigit(t2[0])) continue;
       const a = normalize(t0[0]);
       const b = normalize(t1[0]);
       const d = normalize(t2[0]);
-      if (!isContentWord(a) || !isContentWord(b) || !isContentWord(d) || isBoilerplate(a) || isBoilerplate(b) || isBoilerplate(d)) continue;
+      if (!isPhrasePart(a) || !isPhrasePart(b) || !isPhrasePart(d) || isBoilerplate(a) || isBoilerplate(b) || isBoilerplate(d)) continue;
+      if ([a, b, d].filter(isContentWord).length < 2) continue; // names need words
       const key = `${a} ${b} ${d}`;
       if (seenTri.has(key)) continue;
       seenTri.add(key);
@@ -438,13 +502,15 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   for (const [key, s] of tri) {
     if (s.recent < 2) continue;
     const parts = key.split(" ");
+    const triWord = bestForm(s.forms) ?? key;
     candidates.push({
-      word: bestForm(s.forms) ?? key,
+      word: triWord,
       recent: s.recent,
       prior: s.prior,
       score: score(s) * 1.6 * corpusBoost(key),
       authors: s.authors.size,
       parts,
+      pattern: numberAwarePattern(key, triWord),
     });
     for (const w of parts) {
       claimed.add(w);
@@ -503,7 +569,16 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       recent = Math.max(recent, u.recent);
       sc = Math.max(sc, score(u));
     }
-    candidates.push({ word: bestForm(s.forms) ?? key, recent, prior: s.prior, score: sc, authors: s.authors.size, parts });
+    const biWord = bestForm(s.forms) ?? key;
+    candidates.push({
+      word: biWord,
+      recent,
+      prior: s.prior,
+      score: sc,
+      authors: s.authors.size,
+      parts,
+      pattern: numberAwarePattern(key, biWord),
+    });
     for (const w of parts) claimed.add(w);
   }
 
@@ -520,13 +595,15 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
     const head = uni.get(stems[0]!);
     const tail = uni.get(stems[stems.length - 1]!);
     if (!head || !tail || head.recent < 2 || tail.recent < 2) continue;
+    const connWord = bestForm(s.forms) ?? key;
     const trend: Trend = {
-      word: bestForm(s.forms) ?? key,
+      word: connWord,
       recent: Math.max(s.recent, head.recent, tail.recent),
       prior: s.prior,
       score: Math.max(score(s) * 1.8, score(head), score(tail)) * corpusBoost(key),
       authors: s.authors.size,
       parts: [stems[0]!, stems[stems.length - 1]!],
+      pattern: numberAwarePattern(key, connWord),
     };
     rawCount.set(trend, s.recent);
     connectives.push(trend);
@@ -626,8 +703,13 @@ export function mergeStickyTrends(
   const stickyMs = opts.stickyMs ?? 180_000; // 3 minutes
   const display = opts.display ?? 6;
 
+  // One identity per topic across spellings: "Saturday Five" and "SATURDAY 5"
+  // normalize to the same key, so a display-form flip between ticks overwrites
+  // the sticky slot instead of parking the old spelling beside the new chip.
+  const stemKey = (word: string) => word.toLowerCase().split(/\s+/).map(normalize).join(" ");
+
   // Only real trends earn a dwell; filler is ephemeral (shown this tick or not).
-  for (const t of fresh) if (!t.weak) sticky.set(t.word.toLowerCase(), { until: now + stickyMs, trend: t });
+  for (const t of fresh) if (!t.weak) sticky.set(stemKey(t.word), { until: now + stickyMs, trend: t });
   for (const [key, entry] of sticky) if (entry.until <= now) sticky.delete(key);
 
   // A merged topic replaces its fragments. When "Cambridge University" arrives,
@@ -635,16 +717,16 @@ export function mergeStickyTrends(
   // both puts the merge and its leftovers side by side in the row. Any sticky
   // entry whose every word is contained in a fresh trend's words is dropped.
   for (const t of fresh) {
-    const full = new Set(t.word.toLowerCase().split(/\s+/).map(normalize));
+    const full = new Set(stemKey(t.word).split(" "));
     if (full.size < 2) continue; // single words can't subsume anything
     for (const key of [...sticky.keys()]) {
-      if (key === t.word.toLowerCase()) continue;
-      const parts = key.split(/\s+/).map(normalize);
+      if (key === stemKey(t.word)) continue;
+      const parts = key.split(" ");
       if (parts.length < full.size && parts.every((w) => full.has(w))) sticky.delete(key);
     }
   }
 
-  const freshKeys = new Set(fresh.map((t) => t.word.toLowerCase()));
+  const freshKeys = new Set(fresh.map((t) => stemKey(t.word)));
   const faded = [...sticky.entries()]
     .filter(([key]) => !freshKeys.has(key))
     .map(([, entry]) => entry.trend)
@@ -652,12 +734,12 @@ export function mergeStickyTrends(
   const freshReal = fresh.filter((t) => !t.weak).sort((a, b) => b.score - a.score);
   const freshWeak = fresh.filter((t) => t.weak).sort((a, b) => b.score - a.score);
 
-  // The row is keyed by display word — a sticky entry whose stored trend now
-  // renders the same label as a fresh chip must not appear twice.
+  // The row is deduped by the same normalized identity, so one topic renders
+  // one chip whichever spelling each entry happens to carry.
   const seen = new Set<string>();
   const row: Trend[] = [];
   for (const t of [...freshReal, ...faded, ...freshWeak]) {
-    const key = t.word.toLowerCase();
+    const key = stemKey(t.word);
     if (seen.has(key)) continue;
     seen.add(key);
     row.push(t);

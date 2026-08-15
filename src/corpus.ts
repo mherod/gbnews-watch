@@ -59,12 +59,19 @@ export function parseRssTitles(xml: string): string[] {
   return titles;
 }
 
-const WORD = /[\p{L}][\p{L}\p{N}'']*/gu;
+// Mirrors trending's TOKEN — standalone digit runs are words too, so a
+// headline's "Saturday 5" yields the same stems the detector will look up.
+const WORD = /[\p{L}][\p{L}\p{N}'']*|(?<![\p{L}\p{N}])\p{N}+(?![\p{L}\p{N}])/gu;
+const PURE_DIGITS = /^\p{N}{1,4}$/u;
 
 const isCap = (w: string) => {
   const c = w[0]!;
   return c === c.toUpperCase() && c !== c.toLowerCase();
 };
+
+// A digit can sit inside a proper-noun run ("Saturday 5") without breaking it,
+// but a run made only of digits is a score, not a name — flush requires isCap.
+const capOrDigit = (w: string) => isCap(w) || PURE_DIGITS.test(w);
 
 /**
  * Distils headlines into the term sets the trend detector can weight by:
@@ -83,13 +90,13 @@ export function buildCorpus(titles: readonly string[]): Corpus {
     for (const m of matches) {
       if (stems.size >= MAX_STEMS) break;
       const stem = normalize(m[0]);
-      if (stem.length >= 3 && !STOPWORDS.has(stem)) stems.add(stem);
+      if ((stem.length >= 3 || PURE_DIGITS.test(stem)) && !STOPWORDS.has(stem)) stems.add(stem);
     }
 
     let run: string[] = [];
     const flush = () => {
-      if (run.length >= 2 && phrases.size < MAX_PHRASES) {
-        const stemmed = run.map(normalize).filter((s) => s.length >= 2 && !STOPWORDS.has(s));
+      if (run.length >= 2 && run.some(isCap) && phrases.size < MAX_PHRASES) {
+        const stemmed = run.map(normalize).filter((s) => (s.length >= 2 || PURE_DIGITS.test(s)) && !STOPWORDS.has(s));
         if (stemmed.length >= 2) phrases.add(stemmed.join(" "));
       }
       run = [];
@@ -103,7 +110,7 @@ export function buildCorpus(titles: readonly string[]): Corpus {
         const gap = title.slice(prev.index! + prev[0].length, m.index!);
         if (!/^\s+$/.test(gap)) flush();
       }
-      if (isCap(m[0])) run.push(m[0]);
+      if (capOrDigit(m[0])) run.push(m[0]);
       else flush();
     }
     flush();

@@ -3,7 +3,10 @@ import { entityPattern, matchEntityAt, registerPresenterEntities, startsUppercas
 
 /** Scan a body the way computeTrends does and list the entities detected. */
 function detect(body: string): string[] {
-  const tokens = [...body.matchAll(/[\p{L}][\p{L}\p{N}'']*/gu)].map((m) => m[0]);
+  // Mirrors trending's TOKEN, including digit runs — "Channel 4" needs the "4".
+  const tokens = [...body.matchAll(/[\p{L}][\p{L}\p{N}'']*|(?<![\p{L}\p{N}])\p{N}+(?![\p{L}\p{N}])/gu)].map(
+    (m) => m[0],
+  );
   const found: string[] = [];
   for (let i = 0; i < tokens.length; ) {
     const hit = matchEntityAt(tokens, i);
@@ -78,6 +81,13 @@ test("entityPattern is an alias-aware alternation for highlight/filter", () => {
   const re = new RegExp(`\\b(?:${p})\\b`, "i");
   expect(re.test("blame the Tories")).toBe(true);
   expect(re.test("a Conservative government")).toBe(true);
+});
+
+test("digit tokens reach the entity matcher ('channel 4' was dead code)", () => {
+  // The old tokenizer required a leading letter, so "4" never tokenised and
+  // the "channel 4" alias could not fire.
+  expect(detect("switch over to Channel 4 now")).toEqual(["Channel 4"]);
+  expect(detect("channel four repeats")).toEqual(["Channel 4"]);
 });
 
 test("GB News-isms merge nicknames into the presenter's proper name", () => {
