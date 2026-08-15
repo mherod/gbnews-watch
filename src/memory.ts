@@ -18,6 +18,7 @@
 
 import { scoreText } from "./sentiment";
 import { normalize, STOPWORDS, termRegex, type Trend } from "./trending";
+import { matchEntityAt } from "./entities";
 import type { TopicGraph, TopicNode, TopicLink } from "./graph";
 
 export interface MemoryNode {
@@ -188,8 +189,16 @@ export function reinforceMemory(
     if (hits.length === 0) continue;
     const mood = scoreText(c.body);
 
-    for (const label of hits) {
-      const id = label.toLowerCase();
+    // Resolve each hit to the node it belongs to before touching anything, so
+    // a folded typo and its edges land on the same id.
+    const resolved = hits.map((label) => {
+      const own = label.toLowerCase();
+      // Only ever at creation time: an established node is never re-examined.
+      const folded = mem.nodes[own] ? null : foldTypo(mem, own);
+      return { label, id: folded ?? own, folded: folded !== null };
+    });
+
+    for (const { label, id, folded } of resolved) {
       const node = (mem.nodes[id] ??= {
         label,
         weight: 0,
@@ -201,7 +210,9 @@ export function reinforceMemory(
       // Keep the best-cased spelling seen so far. The old rule froze on the
       // first non-lowercase form, so one SHOUTED "BURNHAM" branded the topic
       // "Andy BURNHAM" forever while the trend row showed "Andy Burnham".
-      if (!node.label || labelQuality(label) > labelQuality(node.label)) {
+      // A misspelling never gets to rename the topic it folded into, however
+      // smartly it happens to be capitalised.
+      if (!folded && (!node.label || labelQuality(label) > labelQuality(node.label))) {
         node.label = label;
       }
       node.weight += 1;
@@ -219,9 +230,10 @@ export function reinforceMemory(
       }
     }
 
-    for (let i = 0; i < hits.length; i++) {
-      for (let j = i + 1; j < hits.length; j++) {
-        const key = edgeKey(hits[i]!.toLowerCase(), hits[j]!.toLowerCase());
+    for (let i = 0; i < resolved.length; i++) {
+      for (let j = i + 1; j < resolved.length; j++) {
+        if (resolved[i]!.id === resolved[j]!.id) continue; // a topic and its own typo
+        const key = edgeKey(resolved[i]!.id, resolved[j]!.id);
         const edge = (mem.edges[key] ??= { weight: 0, lastSeen: now });
         edge.weight += 1;
         edge.lastSeen = now;
@@ -235,15 +247,111 @@ export function reinforceMemory(
   return mem;
 }
 
-const WORD = /[\p{L}][\p{L}\p{N}'']*/gu;
+/**
+ * Optimal string alignment distance — Damerau–Levenshtein restricted to
+ * adjacent transpositions, which is what a mistyped topic actually looks like
+ * ("Univerity", "Burnhma"). Abandoned as soon as the distance passes `max` so
+ * scanning every remembered node stays cheap.
+ */
+function typoDistance(a: string, b: string, max: number): number {
+  if (a === b) return 0;
+  const al = a.length;
+  const bl = b.length;
+  if (Math.abs(al - bl) > max) return max + 1;
+
+  let prevPrev = new Array<number>(bl + 1).fill(0);
+  let prev = new Array<number>(bl + 1);
+  let cur = new Array<number>(bl + 1);
+  for (let j = 0; j <= bl; j++) prev[j] = j;
+
+  for (let i = 1; i <= al; i++) {
+    cur[0] = i;
+    let rowMin = i;
+    for (let j = 1; j <= bl; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        v = Math.min(v, prevPrev[j - 2]! + 1);
+      }
+      cur[j] = v;
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > max) return max + 1;
+    const spare = prevPrev;
+    prevPrev = prev;
+    prev = cur;
+    cur = spare;
+  }
+  return prev[bl]!;
+}
+
+/** A word the entity corpus already recognises — a real thing, not a slip. */
+function isEntityWord(word: string): boolean {
+  if (word.length === 0) return false;
+  return matchEntityAt([word.charAt(0).toUpperCase() + word.slice(1)], 0) !== null;
+}
+
+/**
+ * The remembered node `id` is probably a typo of, or null.
+ *
+ * Commenters misspell the thing they are arguing about, and the memory used to
+ * keep both spellings as separate topics — "Oxford Univerity" sitting beside
+ * "Oxford University", each with its own weight and its own disc on the map.
+ * The guards are deliberately tight, because a wrong merge silently rewrites
+ * what the room said: same word count, at most one word different, a distance
+ * budget that grows only with word length, and never two words the entity
+ * corpus both recognises ("Iran" and "Iraq" are one edit apart).
+ */
+function foldTypo(mem: TopicMemory, id: string): string | null {
+  const words = id.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
+
+  let best: { id: string; weight: number } | null = null;
+  for (const [otherId, node] of Object.entries(mem.nodes)) {
+    const other = otherId.split(/\s+/).filter(Boolean);
+    if (other.length !== words.length) continue;
+
+    let differing = -1;
+    let ok = true;
+    for (let i = 0; i < words.length; i++) {
+      if (words[i] === other[i]) continue;
+      if (differing !== -1) {
+        ok = false; // two slips in one label is a different topic, not a typo
+        break;
+      }
+      differing = i;
+    }
+    if (!ok || differing === -1) continue;
+
+    const a = words[differing]!;
+    const b = other[differing]!;
+    if (isEntityWord(a) && isEntityWord(b)) continue;
+    // A digit difference is deliberate content, never a slip — "Channel 5" is
+    // one keystroke from "Channel 4" and a different broadcaster entirely.
+    if (/\p{N}/u.test(a) || /\p{N}/u.test(b)) continue;
+    const allowed = Math.max(a.length, b.length) <= 7 ? 1 : 2;
+    if (typoDistance(a, b, allowed) > allowed) continue;
+
+    // Fold into the best-established spelling when several are close.
+    if (!best || node.weight > best.weight) best = { id: otherId, weight: node.weight };
+  }
+  return best?.id ?? null;
+}
+
+// Mirrors trending's TOKEN, standalone digit runs included — without them
+// "Channel 4" and "Channel 5" both reduce to {channel} and the consolidation
+// machinery would happily merge two broadcasters into one disc.
+const WORD = /[\p{L}][\p{L}\p{N}'']*|(?<![\p{L}\p{N}])\p{N}+(?![\p{L}\p{N}])/gu;
+const PURE_DIGITS = /^\p{N}{1,4}$/u;
 
 /** The content words a topic is really made of — casing, possessives, plurals
- *  and filler words removed, so "Andy Burnham's" and "Burnham" can be compared. */
+ *  and filler words removed, so "Andy Burnham's" and "Burnham" can be compared.
+ *  Digit stems survive the length gate: the "4" IS what tells topics apart. */
 function topicTokens(label: string): Set<string> {
   const out = new Set<string>();
   for (const m of label.matchAll(WORD)) {
     const stem = normalize(m[0]);
-    if (stem.length >= 3 && !STOPWORDS.has(stem)) out.add(stem);
+    if ((stem.length >= 3 || PURE_DIGITS.test(stem)) && !STOPWORDS.has(stem)) out.add(stem);
   }
   return out;
 }

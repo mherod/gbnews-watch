@@ -359,3 +359,101 @@ test("a fold never carries more programme attributions than the cap", () => {
   expect(Object.keys(buckets).length).toBeLessThanOrEqual(6);
   expect(buckets["A 0"]).toBe(2); // the strongest survives the trim
 });
+
+// --- typo folding ----------------------------------------------------------
+
+test("a misspelt topic folds into the spelling already remembered", () => {
+  const mem = emptyMemory(NOW);
+  // The room establishes the real thing first.
+  reinforceMemory(mem, [c("1", "Oxford University again", "a")], [t("Oxford University")], NOW);
+  reinforceMemory(mem, [c("2", "Oxford University sneers", "b")], [t("Oxford University")], NOW);
+  // Then somebody fat-fingers it.
+  reinforceMemory(mem, [c("3", "Oxford Univerity types", "c")], [t("Oxford Univerity")], NOW);
+
+  expect(mem.nodes["oxford univerity"]).toBeUndefined(); // no twin
+  expect(mem.nodes["oxford university"]!.weight).toBe(3); // the typo reinforced it
+  expect(mem.nodes["oxford university"]!.label).toBe("Oxford University"); // and never renamed it
+});
+
+test("folds a single-word slip in either direction of length", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Leeds again", "a")], [t("Leeds")], NOW);
+  reinforceMemory(mem, [c("2", "Leed again", "b")], [t("Leed")], NOW); // dropped letter
+  expect(mem.nodes["leed"]).toBeUndefined();
+  expect(mem.nodes["leeds"]!.weight).toBe(2);
+
+  const mem2 = emptyMemory(NOW);
+  reinforceMemory(mem2, [c("1", "Labour did it", "a")], [t("Labour")], NOW);
+  reinforceMemory(mem2, [c("2", "Labout did it", "b")], [t("Labout")], NOW); // wrong letter
+  expect(mem2.nodes["labout"]).toBeUndefined();
+  expect(mem2.nodes["labour"]!.weight).toBe(2);
+});
+
+test("keeps genuinely different short words apart", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Hope springs", "a")], [t("Hope")], NOW);
+  reinforceMemory(mem, [c("2", "Hume wrote", "b")], [t("Hume")], NOW);
+  // Two edits apart on a four-letter word — far too loose to call a typo.
+  expect(mem.nodes["hope"]!.weight).toBe(1);
+  expect(mem.nodes["hume"]!.weight).toBe(1);
+});
+
+test("never folds two words the entity corpus both recognises", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Iran again", "a")], [t("Iran")], NOW);
+  reinforceMemory(mem, [c("2", "Iraq again", "b")], [t("Iraq")], NOW);
+  // One edit apart, but both are real countries.
+  expect(mem.nodes["iran"]!.weight).toBe(1);
+  expect(mem.nodes["iraq"]!.weight).toBe(1);
+});
+
+test("folds a slip in one word of a phrase (the 'hrd left' case)", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "the hard left again", "a")], [t("hard left")], NOW);
+  reinforceMemory(mem, [c("2", "the hrd left again", "b")], [t("hrd left")], NOW);
+  expect(mem.nodes["hrd left"]).toBeUndefined();
+  expect(mem.nodes["hard left"]!.weight).toBe(2);
+});
+
+test("never folds across a differing word count", () => {
+  // One character apart, but one is a phrase and the other a single word —
+  // and no token is a subset of the other, so the pairing fold stays out of it
+  // too. Only the typo fold could merge these, and it must not.
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "the hard left again", "a")], [t("hard left")], NOW);
+  reinforceMemory(mem, [c("2", "the hardleft again", "b")], [t("hardleft")], NOW);
+  expect(mem.nodes["hard left"]!.weight).toBe(1);
+  expect(mem.nodes["hardleft"]!.weight).toBe(1);
+});
+
+test("a folded typo contributes its edges to the topic it joined", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Labour and migrants", "a")], [t("Labour"), t("migrants")], NOW);
+  reinforceMemory(mem, [c("2", "Labout and migrants", "b")], [t("Labout"), t("migrants")], NOW);
+  expect(mem.edges[edgeKey("labour", "migrants")]?.weight).toBe(2);
+  expect(mem.edges[edgeKey("labout", "migrants")]).toBeUndefined();
+});
+
+test("a digit difference is content, not a typo — Channel 5 stays whole", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Channel 4 again", "a")], [t("Channel 4")], NOW);
+  reinforceMemory(mem, [c("2", "Channel 5 tonight", "b")], [t("Channel 5")], NOW);
+  // One keystroke apart, but two broadcasters: the typo fold must refuse, and
+  // digit-aware topic tokens ({channel,4} vs {channel,5}) block consolidation.
+  expect(mem.nodes["channel 4"]!.weight).toBe(1);
+  expect(mem.nodes["channel 5"]!.weight).toBe(1);
+});
+
+test("canonicalization never rides a shared word across a digit difference", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(
+    mem,
+    [c("1", "Saturday Roast fans", "a"), c("2", "Saturday Roast encore", "b")],
+    [t("Saturday Roast")],
+    NOW,
+  );
+  // Digit-blind tokens reduced "Saturday 5" to {saturday} — a subset of the
+  // remembered {saturday, roast} — and the fresh chip was relabelled wrongly.
+  const [out] = canonicalizeTrends(mem, [{ word: "Saturday 5", recent: 4, prior: 0, score: 12, authors: 3 }]);
+  expect(out!.word).toBe("Saturday 5");
+});
