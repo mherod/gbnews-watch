@@ -494,7 +494,7 @@ type HlTerm = { word: string; pattern?: string };
 function highlightBody(
   text: string,
   terms: readonly HlTerm[],
-  filterLower: string | null,
+  filterRe: RegExp | null,
   onTerm: (term: string) => void,
   hostRe: RegExp | null,
   exHostRe: RegExp | null,
@@ -513,7 +513,9 @@ function highlightBody(
     try {
       const re = new RegExp(`\\b(${sources.join("|")})\\b`, "gi");
       for (let m = re.exec(text); m !== null; m = re.exec(text)) {
-        const isFilter = filterLower !== null && m[0].toLowerCase() === filterLower;
+        // Alias-aware: the gilt marks *why* this card matched, so filtering by
+        // "Patrick Christys" gilds a bare "Patrick" and "Conservative" gilds "Tory".
+        const isFilter = filterRe !== null && filterRe.test(m[0]);
         spans.push({ start: m.index, end: m.index + m[0].length, kind: isFilter ? "filter" : "trend", text: m[0] });
         if (m.index === re.lastIndex) re.lastIndex++;
       }
@@ -568,7 +570,7 @@ function highlightBody(
 }
 
 /** Comment body clamped to a few lines, expandable when it overflows. */
-function CommentBody({ text, terms, termsKey, filterLower, onTerm, hostRe, exHostRe }: {
+function CommentBody({ text, terms, termsKey, filterLower, onTerm, hostRe, exHostRe, filterRe }: {
   text: string;
   terms: readonly HlTerm[];
   termsKey: string;
@@ -576,6 +578,7 @@ function CommentBody({ text, terms, termsKey, filterLower, onTerm, hostRe, exHos
   onTerm: (term: string) => void;
   hostRe: RegExp | null;
   exHostRe: RegExp | null;
+  filterRe: RegExp | null;
 }) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -588,9 +591,11 @@ function CommentBody({ text, terms, termsKey, filterLower, onTerm, hostRe, exHos
   }, [text, expanded]);
 
   const content = useMemo(
-    () => highlightBody(text, terms, filterLower, onTerm, hostRe, exHostRe),
-    // termsKey stands in for the terms array; onTerm is stable.
-    [text, termsKey, filterLower, onTerm, hostRe, exHostRe],
+    () => highlightBody(text, terms, filterRe, onTerm, hostRe, exHostRe),
+    // termsKey stands in for the terms array; onTerm is stable. filterLower
+    // stays a dep because it changes with the filter even when the alias
+    // pattern behind filterRe doesn't.
+    [text, termsKey, filterLower, onTerm, hostRe, exHostRe, filterRe],
   );
 
   const clamped = !expanded;
@@ -619,7 +624,7 @@ function CommentBody({ text, terms, termsKey, filterLower, onTerm, hostRe, exHos
   );
 }
 
-const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm, hostRe, exHostRe }: {
+const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm, hostRe, exHostRe, filterRe }: {
   c: CommentView;
   terms: readonly HlTerm[];
   termsKey: string;
@@ -627,6 +632,7 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm,
   onTerm: (term: string) => void;
   hostRe: RegExp | null;
   exHostRe: RegExp | null;
+  filterRe: RegExp | null;
 }) {
   const isReply = c.kind === "reply";
   const style = avatarStyle(c.author);
@@ -714,6 +720,7 @@ const Comment = memo(function Comment({ c, terms, termsKey, filterLower, onTerm,
           onTerm={onTerm}
           hostRe={hostRe}
           exHostRe={exHostRe}
+          filterRe={filterRe}
         />
 
         <div className="comment__foot">
@@ -1229,6 +1236,15 @@ function App() {
     return undefined;
   }, [trends, filterLower, host, exHostActive]);
 
+  // The same matcher the feed filters on, reused to decide which highlights are
+  // the active filter — so the gilt marks every form that made a card match, not
+  // just the one spelling that happens to be typed in the chip. Emoji filters
+  // are tinted in the body already and never sit on word boundaries.
+  const filterRe = useMemo(
+    () => (filter && !isEmoji(filter) ? termRegex(filter, filterPattern) : null),
+    [filter, filterPattern],
+  );
+
   // The tab strip is a surface too: name the slice being watched, else the
   // programme being reacted to, so the tab is findable across a wall of tabs.
   useEffect(() => {
@@ -1498,6 +1514,7 @@ function App() {
                       onTerm={toggleFilter}
                       hostRe={host?.re ?? null}
                       exHostRe={exHostActive?.re ?? null}
+                      filterRe={filterRe}
                     />
                   ),
                 )}
