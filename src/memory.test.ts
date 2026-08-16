@@ -523,6 +523,73 @@ test("the bodies ledger survives storage, so a restart still knows the rant", ()
   expect(restored.nodes["boats"]!.weight).toBeCloseTo(1.25, 5); // repost recognised after reload
 });
 
+// --- voice identity hardening ----------------------------------------------
+
+test("a shared fallback name never aliases distinct commenters into one voice", () => {
+  const mem = emptyMemory(NOW);
+  const trends = [t("boats")];
+  // Both display as the IAM-outage fallback, but they are different accounts.
+  const anon = (id: string, body: string, uuid: string): MemoryInput => ({
+    id,
+    body,
+    author: "Anonymous",
+    authorUuid: uuid,
+    postedAt: new Date(NOW).toISOString(),
+  });
+  reinforceMemory(mem, [anon("1", "boats again", "acct-1")], trends, NOW);
+  reinforceMemory(mem, [anon("2", "the boats keep coming", "acct-2")], trends, NOW);
+  expect(mem.nodes["boats"]!.weight).toBe(2); // two people, full weight each
+  expect(mem.nodes["boats"]!.authors).toEqual(["Anonymous"]); // one line on the disc
+});
+
+test("voice damping keeps working past the author display cap", () => {
+  const mem = emptyMemory(NOW);
+  const trends = [t("boats")];
+  // Sixteen genuine voices fill the display list...
+  for (let i = 0; i < 16; i++) {
+    reinforceMemory(mem, [c(`f${i}`, `boats verdict ${"very ".repeat(i + 1).trim()}`, `u${i}`)], trends, NOW);
+  }
+  expect(mem.nodes["boats"]!.weight).toBe(16);
+  expect(mem.nodes["boats"]!.authors).toHaveLength(16);
+  // ...then a seventeenth keyboard posts five takes in fresh words. The old
+  // display-list check could never see them, so every post counted in full.
+  for (let i = 0; i < 5; i++) {
+    reinforceMemory(mem, [c(`o${i}`, `boats obsession ${"no ".repeat(i + 1).trim()}`, "obsessive")], trends, NOW);
+  }
+  expect(mem.nodes["boats"]!.weight).toBeCloseTo(18, 5); // 16 + 1 + 4×¼, not 21
+  expect(mem.nodes["boats"]!.authors).toHaveLength(16); // display list unchanged
+});
+
+test("a counter-suffixed rant repost still reads as copypasta", () => {
+  const mem = emptyMemory(NOW);
+  const trends = [t("Fabian Society")];
+  // The trivial evasion: each sock appends a counter so exact-match misses.
+  for (let i = 0; i < 9; i++) {
+    reinforceMemory(mem, [c(`s${i}`, `the Fabian Society is pure evil ${i}`, `sock${i}`)], trends, NOW);
+  }
+  expect(mem.nodes["fabian society"]!.weight).toBeCloseTo(1 + 8 * 0.25, 5);
+  expect(mem.nodes["fabian society"]!.authors).toHaveLength(1);
+});
+
+test("short bodies that differ only in numbers stay distinct", () => {
+  const mem = emptyMemory(NOW);
+  const trends = [t("quid")];
+  // Too little text to call these the same rant — the exact wording decides.
+  reinforceMemory(mem, [c("1", "send 100 quid", "a")], trends, NOW);
+  reinforceMemory(mem, [c("2", "send 500 quid", "b")], trends, NOW);
+  expect(mem.nodes["quid"]!.weight).toBe(2);
+});
+
+test("the voices ledger survives storage like the bodies ledger", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "boats again", "solo")], [t("boats")], NOW);
+  const restored = deserializeMemory(serializeMemory(mem), NOW);
+  reinforceMemory(restored, [c("2", "more boats here", "solo")], [t("boats")], NOW);
+  expect(restored.nodes["boats"]!.weight).toBeCloseTo(1.25, 5); // still a warm voice
+  // Old snapshots predate the ledger and restore with it empty.
+  expect(deserializeMemory(JSON.stringify({ nodes: {}, edges: {} }), NOW).voices).toEqual([]);
+});
+
 test("canonicalization never rides a shared word across a digit difference", () => {
   const mem = emptyMemory(NOW);
   reinforceMemory(
