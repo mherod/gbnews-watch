@@ -258,6 +258,82 @@ test("a folded number key still matches its written display form ('Rugby Sevens'
   expect(re.test("rugby 7 highlights")).toBe(true);
 });
 
+// --- overlapping windows of one repeated sentence ---------------------------
+
+test("overlapping trigram windows of one rant collapse to the strongest", () => {
+  // Observed live: "Fabian Society Invent" and "Society Invent Comunisim"
+  // stood side by side — two windows over one four-word rant span.
+  const trends = computeTrends(fromMany("Fabian Society Invent Comunisim", 6), NOW);
+  const windows = trends.filter((t) => /society|invent|comunisim/i.test(t.word));
+  expect(windows).toHaveLength(1);
+});
+
+test("consecutive bigram windows of one repeated line collapse to the strongest", () => {
+  // Observed live: "open mic", "mic last" and "last night" all charted from
+  // the same repeated sentence.
+  const trends = computeTrends(fromMany("crowd at the open mic last night", 6), NOW);
+  const windows = trends.filter((t) => /mic|night/i.test(t.word));
+  expect(windows).toHaveLength(1);
+});
+
+test("a trigram sharing one word with each of two names keeps its chip", () => {
+  // The fold must require a single anchor's re-windowed span — words claimed
+  // by two DIFFERENT names must not add up to a fold.
+  const comments = [
+    ...fromMany("Zorblat Quixley Dinsdale rally", 5),
+    ...Array.from({ length: 5 }, (_, i) => c("Yentob Marple Fenwick speech", { author: `b${i}` })),
+    ...Array.from({ length: 4 }, (_, i) => c("Quixley Marple Debate tonight", { author: `d${i}` })),
+  ];
+  const words = computeTrends(comments, NOW, { limit: 8 }).map((t) => t.word.toLowerCase());
+  expect(words).toContain("zorblat quixley dinsdale");
+  expect(words).toContain("yentob marple fenwick");
+  expect(words).toContain("quixley marple debate");
+});
+
+test("a true re-windowing shape folds only with lockstep support", () => {
+  // Same suffix/prefix geometry, different crowds — both topics keep chips.
+  const comments = [
+    ...fromMany("Grand Wobbly Energy is a con", 4),
+    ...Array.from({ length: 3 }, (_, i) => c("Wobbly Energy Prices went mad", { author: `h${i}` })),
+  ];
+  const words = computeTrends(comments, NOW, { limit: 8 }).map((t) => t.word.toLowerCase());
+  expect(words).toContain("grand wobbly energy");
+  expect(words).toContain("wobbly energy prices"); // display form, not the stem key
+});
+
+test("a chained bigram with its own support never folds (lockstep pinned)", () => {
+  // Junction geometry alone must not fold: "boats everywhere" chains off
+  // "stop boats" at the junction word but brings a different crowd.
+  const comments = [
+    ...fromMany("stop boats now", 4),
+    ...Array.from({ length: 3 }, (_, i) => c("boats everywhere man", { author: `v${i}` })),
+  ];
+  const words = computeTrends(comments, NOW).map((t) => t.word.toLowerCase());
+  expect(words).toContain("stop boats");
+  expect(words.some((w) => w.includes("everywhere"))).toBe(true);
+});
+
+test("'per cent' never mints a bare 'cent' chip", () => {
+  const trends = computeTrends(fromMany("interest rates at 5 per cent now", 6), NOW);
+  expect(trends.some((t) => /^cent$/i.test(t.word))).toBe(false);
+});
+
+test("a sibling phrase sharing a word but with its own commenters survives", () => {
+  const comments = [
+    ...fromMany("stop boats now", 4),
+    ...Array.from({ length: 3 }, (_, i) => c("small boats everywhere", { author: `v${i}` })),
+  ];
+  const trends = computeTrends(comments, NOW);
+  const words = trends.map((t) => t.word.toLowerCase());
+  expect(words).toContain("stop boats");
+  expect(words).toContain("small boats");
+});
+
+test("prepositional glue never anchors a phrase chip ('via Left' regression)", () => {
+  const trends = computeTrends(fromMany("pushed via Left wing groups", 6), NOW);
+  expect(trends.some((t) => /\bvia\b/i.test(t.word))).toBe(false);
+});
+
 test("a spelling flip between ticks never doubles the chip", () => {
   const sticky = new Map<string, StickyEntry>();
   const t0 = 1_000_000;

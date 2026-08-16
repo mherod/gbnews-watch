@@ -18,6 +18,10 @@ export const STOPWORDS = new Set(
     // stem — the hole "sometimes" slipped through.
     + "another other several few certain none both each either neither plenty "
     + "anyone everyone nobody somebody everybody anybody "
+    // Prepositional/connective glue and a stock typo, all seen minting phrase
+    // chips on the live board: "via Left", "motors etc", "teh price". "cent"
+    // rides along with "per" — without its glue word it is a bare fragment.
+    + "via per cent vs versus amid etc teh "
     + "what who whom which why how where whose because while after before again once "
     + "he's she's it's i'm you're they're we're don't didn't doesn't isn't aren't wasn't "
     + "can't won't wouldn't couldn't shouldn't he'd she'd they'd i've you've we've "
@@ -496,12 +500,48 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   const consumed = new Set<string>();
   const claimed = new Set<string>(); // phrase endpoints already spoken for
 
-  // Proper-noun trigrams (full names) first: they claim all three words so the
-  // overlapping name-bigrams below fold into the single full name — "Muhammad
-  // Ziauddin Yusuf", not "Muhammad Ziauddin" + "Ziauddin Yusuf".
-  for (const [key, s] of tri) {
+  // Phrases already spoken for — kept or folded — with their raw stats, so a
+  // later window of the same repeated sentence can be recognised by chaining
+  // off one of these with lockstep support (same count, same voices).
+  const spanAnchors: Array<{ parts: string[]; s: Stat }> = [];
+  const sameVoices = (x: ReadonlySet<string>, y: ReadonlySet<string>) =>
+    x.size === y.size && [...x].every((v) => y.has(v));
+  // Drop a window but suppress the words that live only inside it, exactly as
+  // the connective pass does — "comunisim" must not resurface as a bare chip.
+  const foldWindow = (parts: string[], s: Stat) => {
+    spanAnchors.push({ parts, s });
+    for (const w of parts) {
+      claimed.add(w);
+      const u = uni.get(w);
+      if (u && s.recent >= 0.6 * u.recent) consumed.add(w);
+    }
+  };
+
+  // Proper-noun trigrams (full names) first, strongest first: they claim all
+  // three words so the overlapping name-bigrams below fold into the single
+  // full name — "Muhammad Ziauddin Yusuf", not "Muhammad Ziauddin" +
+  // "Ziauddin Yusuf". Two trigrams sharing a whole bigram are re-windowings of
+  // one longer span — "Fabian Society Invent" beside "Society Invent
+  // Comunisim" — so the stronger speaks and the weaker folds into it.
+  for (const [key, s] of [...tri.entries()].sort((a, b) => score(b[1]) - score(a[1]))) {
     if (s.recent < 2) continue;
     const parts = key.split(" ");
+    // A re-windowing of one longer span: a single stronger anchor's two-word
+    // tail is this trigram's head (or vice versa), with the very same support
+    // — same count, same voices. Sharing one word with each of two different
+    // names is NOT that, and a genuine third topic keeps its chip.
+    const rewindowed = spanAnchors.some((k) => {
+      if (k.s.recent !== s.recent || !sameVoices(k.s.authors, s.authors)) return false;
+      const kp = k.parts;
+      return (
+        (kp[kp.length - 2] === parts[0] && kp[kp.length - 1] === parts[1]) ||
+        (kp[0] === parts[1] && kp[1] === parts[2])
+      );
+    });
+    if (rewindowed) {
+      foldWindow(parts, s);
+      continue;
+    }
     const triWord = bestForm(s.forms) ?? key;
     candidates.push({
       word: triWord,
@@ -512,6 +552,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       parts,
       pattern: numberAwarePattern(key, triWord),
     });
+    spanAnchors.push({ parts, s });
     for (const w of parts) {
       claimed.add(w);
       consumed.add(w);
@@ -524,10 +565,25 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
   // Stadlen" topic carrying the bigger count, not two chips for the same person.
   // Each bigram is a distinct phrase (kept), and claims its endpoints so the
   // connective pass below can't re-fragment the same topic.
-  for (const [key, s] of bi) {
+  for (const [key, s] of [...bi.entries()].sort((a, b) => score(b[1]) - score(a[1]))) {
     if (s.recent < 2) continue;
     const parts = key.split(" ");
     if (parts.every((p) => claimed.has(p))) continue; // both words already in a full-name trigram
+    // Consecutive windows of one repeated sentence chain off a spoken-for
+    // phrase's edge with the very same support — "open mic" → "mic last" →
+    // "last night", each sharing its junction word, count and voices. A
+    // genuine sibling topic sharing a word ("stop boats" / "small boats")
+    // brings its own commenters, breaks the lockstep, and survives.
+    const chained = spanAnchors.some(
+      (k) =>
+        (k.parts[k.parts.length - 1] === parts[0] || k.parts[0] === parts[parts.length - 1]) &&
+        k.s.recent === s.recent &&
+        sameVoices(k.s.authors, s.authors),
+    );
+    if (chained) {
+      foldWindow(parts, s);
+      continue;
+    }
     // A name either by the chat's own capitalisation, or vouched for by the
     // news cycle: "andy burnham" in a headline confirms the merge even when
     // commenters type it lowercase and the caps signal never fires.
@@ -579,6 +635,7 @@ export function computeTrends(comments: readonly TrendInput[], now: number, opti
       parts,
       pattern: numberAwarePattern(key, biWord),
     });
+    spanAnchors.push({ parts, s });
     for (const w of parts) claimed.add(w);
   }
 
