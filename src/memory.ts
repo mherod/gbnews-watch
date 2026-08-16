@@ -66,6 +66,12 @@ export interface TopicMemory {
   edges: Record<string, MemoryEdge>;
   /** Comment ids already folded in, so re-renders never double-count. */
   seen: string[];
+  /**
+   * Fingerprints of comment bodies already folded in — what was said, not who
+   * said it. A body that reappears is copy-pasta (one keyboard or fifty sock
+   * accounts) and reinforces at a fraction rather than in full.
+   */
+  bodies: string[];
   /** When the weights were last decayed. */
   decayedAt: number;
 }
@@ -108,6 +114,27 @@ const MAX_NODES = 90;
 const MAX_EDGES = 300;
 
 /**
+ * Reinforcement fraction for repetition — a voice the topic has already
+ * counted, or a body the room has already read. Novelty carries the weight;
+ * repetition only keeps it warm. Observed live: one rant reposted by ~50
+ * generated-name accounts pegged a dozen topics at 47–90 while every organic
+ * multi-voice topic sat under 7.
+ */
+const REPEAT_STEP = 0.25;
+
+/**
+ * Cheap fingerprint of what a comment says: lowercased, whitespace-collapsed,
+ * then hashed (djb2-xor) so the rolling `bodies` list stays small in the
+ * snapshot. The length rides along to make accidental collisions vanishing.
+ */
+function fingerprint(body: string): string {
+  const text = body.toLowerCase().replace(/\s+/g, " ").trim();
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = (Math.imul(h, 33) ^ text.charCodeAt(i)) >>> 0;
+  return `${h.toString(36)}:${text.length.toString(36)}`;
+}
+
+/**
  * Separator for edge keys. Explicit (and exported with `edgeKey`) because
  * topics can themselves contain spaces — "Matthew Stadlen", "stop the boats" —
  * so a space would make the key ambiguous to split back apart.
@@ -115,7 +142,7 @@ const MAX_EDGES = 300;
 const SEP = String.fromCharCode(31); // ASCII unit separator; topics contain spaces, so a space would be ambiguous
 
 export function emptyMemory(now = 0): TopicMemory {
-  return { nodes: {}, edges: {}, seen: [], decayedAt: now };
+  return { nodes: {}, edges: {}, seen: [], bodies: [], decayedAt: now };
 }
 
 /** Stable, order-independent key for the link between two topics. */
@@ -180,6 +207,8 @@ export function reinforceMemory(
   const seen = new Set(mem.seen);
   const matchers = trends.map((t) => ({ label: t.word, re: termRegex(t.word, t.pattern) }));
 
+  const knownBodies = new Set((mem.bodies ??= []));
+
   for (const c of comments) {
     if (seen.has(c.id)) continue;
     seen.add(c.id);
@@ -189,15 +218,33 @@ export function reinforceMemory(
     if (hits.length === 0) continue;
     const mood = scoreText(c.body);
 
+    // Copy-pasta check before author damping: a rant reposted verbatim adds
+    // only a fraction however many puppet accounts take turns posting it.
+    const print = fingerprint(c.body);
+    const copied = knownBodies.has(print);
+    if (!copied) {
+      knownBodies.add(print);
+      mem.bodies.push(print);
+    }
+
     // Resolve each hit to the node it belongs to before touching anything, so
-    // a folded typo and its edges land on the same id.
-    const resolved = hits.map((label) => {
+    // a folded typo and its edges land on the same id. Deduped by id: when a
+    // typo and its canonical spelling both trend and one comment matches both,
+    // the node must count the comment once — not read its second hit as a
+    // self-repeat and quarter-step its own edges.
+    const byId = new Map<string, { label: string; id: string; folded: boolean }>();
+    for (const label of hits) {
       const own = label.toLowerCase();
       // Only ever at creation time: an established node is never re-examined.
       const folded = mem.nodes[own] ? null : foldTypo(mem, own);
-      return { label, id: folded ?? own, folded: folded !== null };
-    });
+      const id = folded ?? own;
+      if (!byId.has(id) || byId.get(id)!.folded) {
+        byId.set(id, { label, id, folded: folded !== null });
+      }
+    }
+    const resolved = [...byId.values()];
 
+    const steps = new Map<string, number>();
     for (const { label, id, folded } of resolved) {
       const node = (mem.nodes[id] ??= {
         label,
@@ -215,17 +262,27 @@ export function reinforceMemory(
       if (!folded && (!node.label || labelQuality(label) > labelQuality(node.label))) {
         node.label = label;
       }
-      node.weight += 1;
-      node.lastSeen = now;
-      if (opts.onAir) bumpOnAir(node, opts.onAir);
-      if (mood !== null) {
-        node.sentSum += mood;
-        node.sentCount += 1;
-      }
-      // Breadth is measured against everyone ever seen on this topic, not just
-      // this batch, so one commenter posting all evening stays one voice.
       const author = c.author ?? "";
-      if (node.authors.length < MAX_AUTHORS && !node.authors.includes(author)) {
+      const knownVoice = node.authors.includes(author);
+      // Novelty carries the weight, repetition only keeps it warm: a repeated
+      // body or an already-counted voice reinforces at a fraction. (A topic
+      // whose author list has hit its cap treats everyone as fresh — by then
+      // it is genuinely broad, and damping exists for the narrow topics one
+      // keyboard, or one rant, keeps warm.)
+      const step = copied || knownVoice ? REPEAT_STEP : 1;
+      steps.set(id, Math.min(steps.get(id) ?? 1, step));
+      node.weight += step;
+      node.lastSeen = now;
+      if (opts.onAir) bumpOnAir(node, opts.onAir, step);
+      if (mood !== null) {
+        node.sentSum += mood * step;
+        node.sentCount += step;
+      }
+      // Breadth counts people who brought their own words — a copy-pasted body
+      // never adds its poster to the voices, so fifty socks reposting one rant
+      // read as one voice, not a crowd. Measured against everyone ever seen on
+      // this topic, so one commenter posting all evening stays one voice too.
+      if (!copied && !knownVoice && node.authors.length < MAX_AUTHORS) {
         node.authors.push(author);
       }
     }
@@ -235,13 +292,15 @@ export function reinforceMemory(
         if (resolved[i]!.id === resolved[j]!.id) continue; // a topic and its own typo
         const key = edgeKey(resolved[i]!.id, resolved[j]!.id);
         const edge = (mem.edges[key] ??= { weight: 0, lastSeen: now });
-        edge.weight += 1;
+        // The tether thickens at the pace of its more-saturated end.
+        edge.weight += Math.min(steps.get(resolved[i]!.id) ?? 1, steps.get(resolved[j]!.id) ?? 1);
         edge.lastSeen = now;
       }
     }
   }
 
   if (mem.seen.length > maxSeen) mem.seen = mem.seen.slice(-maxSeen);
+  if (mem.bodies.length > maxSeen) mem.bodies = mem.bodies.slice(-maxSeen);
   consolidateMemory(mem, opts);
   prune(mem, opts);
   return mem;
@@ -375,9 +434,9 @@ function trimOnAir(buckets: Record<string, number>): void {
 }
 
 /** One more comment argued this topic under the given broadcast. */
-function bumpOnAir(node: MemoryNode, title: string): void {
+function bumpOnAir(node: MemoryNode, title: string, step = 1): void {
   const buckets = (node.onAir ??= {});
-  buckets[title] = (buckets[title] ?? 0) + 1;
+  buckets[title] = (buckets[title] ?? 0) + step;
   trimOnAir(buckets);
 }
 
@@ -801,6 +860,7 @@ export function deserializeMemory(raw: string | null, now: number): TopicMemory 
       nodes: parsed.nodes,
       edges: parsed.edges,
       seen: Array.isArray(parsed.seen) ? parsed.seen : [],
+      bodies: Array.isArray(parsed.bodies) ? parsed.bodies : [],
       decayedAt: typeof parsed.decayedAt === "number" ? parsed.decayedAt : now,
     };
   } catch {

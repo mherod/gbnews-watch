@@ -120,11 +120,18 @@ test("the server learns one shared topic graph and serves it at /api/room", asyn
   });
 
   try {
-    // Distinct authors, one topic — enough for a real (non-filler) trend.
-    for (let i = 0; i < 4; i++) {
+    // Distinct authors with their own words, one topic — enough for a real
+    // (non-filler) trend, and none of it reads as copy-pasta to the memory.
+    const voices = [
+      "Burnham is at it again",
+      "typical Burnham behaviour",
+      "Burnham never stops honestly",
+      "here we go, Burnham once more",
+    ];
+    for (let i = 0; i < voices.length; i++) {
       source.emit({
         type: "comment",
-        comment: comment({ body: "Burnham is at it again", authorUuid: `a${i}`, author: `Author ${i}` }),
+        comment: comment({ body: voices[i]!, authorUuid: `a${i}`, author: `Author ${i}` }),
       });
     }
     await Bun.sleep(80); // a few learning ticks
@@ -355,9 +362,14 @@ test("the learned graph survives a server restart and doesn't double-count the r
     },
   };
   const offline = async () => ({ stems: [], phrases: [] });
-  const burnhamComments = Array.from({ length: 4 }, (_, i) =>
-    comment({ uuid: `fixed-${i}`, body: "Burnham is at it again", authorUuid: `a${i}`, author: `Author ${i}` }),
-  );
+  // Four voices in their own words — identical bodies would be copy-pasta and
+  // reinforce at a fraction, which is not what this test is about.
+  const burnhamComments = [
+    "Burnham is at it again",
+    "typical Burnham behaviour",
+    "Burnham never stops honestly",
+    "here we go, Burnham once more",
+  ].map((body, i) => comment({ uuid: `fixed-${i}`, body, authorUuid: `a${i}`, author: `Author ${i}` }));
 
   // First lifetime: learn, snapshot, die.
   const sourceA = controllableSource();

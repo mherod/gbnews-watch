@@ -28,7 +28,7 @@ test("reinforces a link each time two topics are argued together", () => {
   reinforceMemory(mem, [c("1", "Labour and migrants")], trends, NOW);
   expect(mem.edges[edgeKey("labour", "migrants")]?.weight).toBe(1);
 
-  reinforceMemory(mem, [c("2", "migrants, blame Labour")], trends, NOW);
+  reinforceMemory(mem, [c("2", "migrants, blame Labour", "b")], trends, NOW);
   expect(mem.edges[edgeKey("labour", "migrants")]?.weight).toBe(2); // accumulated, not recomputed
 });
 
@@ -78,8 +78,14 @@ test("a repeatedly-argued pair outweighs a one-off pair", () => {
 test("counts distinct voices, so one ranter can't inflate breadth", () => {
   const mem = emptyMemory(NOW);
   const trends = [t("boats")];
-  reinforceMemory(mem, [c("1", "boats", "solo"), c("2", "boats", "solo"), c("3", "boats", "other")], trends, NOW);
-  expect(mem.nodes["boats"]!.weight).toBe(3); // three mentions
+  reinforceMemory(
+    mem,
+    [c("1", "boats", "solo"), c("2", "boats again", "solo"), c("3", "the boats", "other")],
+    trends,
+    NOW,
+  );
+  // solo's second mention is a warm repeat (¼); other's fresh words count full.
+  expect(mem.nodes["boats"]!.weight).toBeCloseTo(2.25, 5);
   expect(mem.nodes["boats"]!.authors).toEqual(["solo", "other"]); // two people
 });
 
@@ -88,10 +94,12 @@ test("a lone commenter posting across many batches stays one voice", () => {
   const trends = [t("boats")];
   // Comments arrive incrementally, as they do from the live stream.
   reinforceMemory(mem, [c("1", "boats", "solo")], trends, NOW);
-  reinforceMemory(mem, [c("2", "boats", "solo")], trends, NOW);
-  reinforceMemory(mem, [c("3", "boats", "solo")], trends, NOW);
-  expect(mem.nodes["boats"]!.weight).toBe(3); // three mentions accumulate
-  expect(memoryToGraph(mem, { minWeight: 0.5 }).nodes[0]?.voices).toBe(1); // but one voice
+  reinforceMemory(mem, [c("2", "boats again", "solo")], trends, NOW);
+  reinforceMemory(mem, [c("3", "more boats", "solo")], trends, NOW);
+  // Mentions keep accumulating, but a voice the topic already counted only
+  // keeps it warm (¼ each) rather than stacking full weight.
+  expect(mem.nodes["boats"]!.weight).toBeCloseTo(1.5, 5);
+  expect(memoryToGraph(mem, { minWeight: 0.5 }).nodes[0]?.voices).toBe(1); // one voice
 });
 
 test("remembers one topic per word regardless of casing", () => {
@@ -99,7 +107,7 @@ test("remembers one topic per word regardless of casing", () => {
   // same topic arrives as "stop" one moment and "Stop" the next.
   const mem = emptyMemory(NOW);
   reinforceMemory(mem, [c("1", "stop the boats", "a")], [t("stop")], NOW);
-  reinforceMemory(mem, [c("2", "Stop the boats", "b")], [t("Stop")], NOW);
+  reinforceMemory(mem, [c("2", "Stop the boats now", "b")], [t("Stop")], NOW);
 
   expect(Object.keys(mem.nodes).filter((k) => k.toLowerCase() === "stop")).toHaveLength(1);
   expect(mem.nodes["stop"]!.weight).toBe(2); // both mentions on one topic
@@ -280,8 +288,8 @@ test("survives a storage round-trip, and shrugs off junk", () => {
 test("attributes reinforcement to the programme on air, decaying like everything else", () => {
   const mem = emptyMemory(NOW);
   const trends = [t("boats")];
-  reinforceMemory(mem, [c("1", "boats"), c("2", "boats again")], trends, NOW, { onAir: "Breakfast" });
-  reinforceMemory(mem, [c("3", "boats still")], trends, NOW + MIN, { onAir: "Patrick Christys" });
+  reinforceMemory(mem, [c("1", "boats", "a"), c("2", "boats again", "b")], trends, NOW, { onAir: "Breakfast" });
+  reinforceMemory(mem, [c("3", "boats still", "d")], trends, NOW + MIN, { onAir: "Patrick Christys" });
 
   const buckets = mem.nodes["boats"]!.onAir!;
   expect(buckets["Breakfast"]).toBeCloseTo(2, 1); // two comments under Breakfast
@@ -317,8 +325,8 @@ test("programme attribution survives a consolidation fold", () => {
 test("projects programme shares onto graph nodes, strongest first", () => {
   const mem = emptyMemory(NOW);
   const trends = [t("boats")];
-  for (let i = 0; i < 3; i++) reinforceMemory(mem, [c(`b${i}`, "boats", `u${i}`)], trends, NOW, { onAir: "Breakfast" });
-  reinforceMemory(mem, [c("p", "boats", "u9")], trends, NOW, { onAir: "Patrick Christys" });
+  for (let i = 0; i < 3; i++) reinforceMemory(mem, [c(`b${i}`, `boats ${i}`, `u${i}`)], trends, NOW, { onAir: "Breakfast" });
+  reinforceMemory(mem, [c("p", "boats still", "u9")], trends, NOW, { onAir: "Patrick Christys" });
 
   const node = memoryToGraph(mem, { minWeight: 0.5 }).nodes[0]!;
   expect(node.onAir?.map((p) => p.title)).toEqual(["Breakfast", "Patrick Christys"]);
@@ -330,7 +338,7 @@ test("only a handful of programmes are remembered per topic", () => {
   const mem = emptyMemory(NOW);
   const trends = [t("boats")];
   for (let i = 0; i < 9; i++) {
-    reinforceMemory(mem, [c(`s${i}`, "boats")], trends, NOW, { onAir: `Show ${i}` });
+    reinforceMemory(mem, [c(`s${i}`, `boats ${i}`, `u${i}`)], trends, NOW, { onAir: `Show ${i}` });
   }
   const buckets = mem.nodes["boats"]!.onAir!;
   expect(Object.keys(buckets).length).toBeLessThanOrEqual(6);
@@ -442,6 +450,77 @@ test("a digit difference is content, not a typo — Channel 5 stays whole", () =
   // digit-aware topic tokens ({channel,4} vs {channel,5}) block consolidation.
   expect(mem.nodes["channel 4"]!.weight).toBe(1);
   expect(mem.nodes["channel 5"]!.weight).toBe(1);
+});
+
+// --- copypasta damping -----------------------------------------------------
+
+test("a copy-pasted rant reinforces at a fraction however many socks post it", () => {
+  const mem = emptyMemory(NOW);
+  const rant = "the Fabian Society is pure evil";
+  const trends = [t("Fabian Society")];
+  // Observed live: one rant under ~50 generated-name accounts pegged a dozen
+  // topics at 47–90 weight while organic multi-voice topics sat under 7.
+  for (let i = 0; i < 9; i++) {
+    reinforceMemory(mem, [c(`s${i}`, rant, `sock${i}`)], trends, NOW);
+  }
+  const node = mem.nodes["fabian society"]!;
+  expect(node.weight).toBeCloseTo(1 + 8 * 0.25, 5); // 3, not 9
+  expect(node.authors).toHaveLength(1); // reposted words are one voice, not a crowd
+});
+
+test("distinct voices with their own words still accumulate in full", () => {
+  const mem = emptyMemory(NOW);
+  const trends = [t("boats")];
+  reinforceMemory(
+    mem,
+    [c("1", "boats again in Dover", "a"), c("2", "the boats keep coming", "b"), c("3", "stop the boats now", "d")],
+    trends,
+    NOW,
+  );
+  expect(mem.nodes["boats"]!.weight).toBe(3);
+  expect(mem.nodes["boats"]!.authors).toHaveLength(3);
+});
+
+test("copypasta damping carries to the edges it argues", () => {
+  const mem = emptyMemory(NOW);
+  const trends = [t("Labour"), t("migrants")];
+  const rant = "Labour and migrants ruined it";
+  for (let i = 0; i < 5; i++) reinforceMemory(mem, [c(`s${i}`, rant, `sock${i}`)], trends, NOW);
+  expect(mem.edges[edgeKey("labour", "migrants")]!.weight).toBeCloseTo(2, 5); // 1 + 4×¼
+});
+
+test("an edge steps at the pace of its more-saturated end", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "boats again", "solo")], [t("boats")], NOW);
+  // solo is now a known voice on boats but new to bins: a fresh comment
+  // arguing both thickens the tether at the warm quarter-step only.
+  reinforceMemory(mem, [c("2", "boats and bins", "solo")], [t("boats"), t("bins")], NOW);
+  expect(mem.nodes["bins"]!.weight).toBe(1); // the fresh end counts in full
+  expect(mem.edges[edgeKey("boats", "bins")]!.weight).toBeCloseTo(0.25, 5);
+});
+
+test("a comment matching a topic twice (typo + canonical) counts it once", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "Oxford University wins", "a")], [t("Oxford University")], NOW);
+  // Both spellings trend at once and one comment quotes both; the typo
+  // resolves onto the established node, which must not read the second hit
+  // as a self-repeat and quarter-step its own edges.
+  reinforceMemory(
+    mem,
+    [c("2", "Oxford Univerity and Oxford University with migrants", "b")],
+    [t("Oxford University"), t("Oxford Univerity"), t("migrants")],
+    NOW,
+  );
+  expect(mem.nodes["oxford university"]!.weight).toBe(2); // 1 + 1, not 1 + 1.25
+  expect(mem.edges[edgeKey("oxford university", "migrants")]!.weight).toBe(1);
+});
+
+test("the bodies ledger survives storage, so a restart still knows the rant", () => {
+  const mem = emptyMemory(NOW);
+  reinforceMemory(mem, [c("1", "boats again", "a")], [t("boats")], NOW);
+  const restored = deserializeMemory(serializeMemory(mem), NOW);
+  reinforceMemory(restored, [c("2", "boats again", "b")], [t("boats")], NOW);
+  expect(restored.nodes["boats"]!.weight).toBeCloseTo(1.25, 5); // repost recognised after reload
 });
 
 test("canonicalization never rides a shared word across a digit difference", () => {
