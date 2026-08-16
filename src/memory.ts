@@ -31,10 +31,12 @@ export interface MemoryNode {
   /** Decayed reinforcement — how much this topic has mattered lately. */
   weight: number;
   /**
-   * Distinct people who have raised it, kept as ids rather than a counter:
-   * comments arrive incrementally, so a running total would credit the same
-   * commenter again on every batch and turn one obsessive into a crowd.
-   * Capped — beyond a handful, "lots of people" is the only signal that matters.
+   * Display names of the distinct voices behind the topic, kept as a list
+   * rather than a counter: comments arrive incrementally, so a running total
+   * would credit the same commenter again on every batch and turn one
+   * obsessive into a crowd. Capped — beyond a handful, "lots of people" is
+   * the only signal that matters. Damping identity does NOT live here (the
+   * cap would blind it); that is the memory-wide `voices` ledger.
    */
   authors: string[];
   sentSum: number;
@@ -72,6 +74,14 @@ export interface TopicMemory {
    * accounts) and reinforces at a fraction rather than in full.
    */
   bodies: string[];
+  /**
+   * Hashed (topic, voice) pairs that have already spoken, kept apart from the
+   * capped display list on each node: `authors` stops admitting at
+   * MAX_AUTHORS, and a damping check against it alone would treat every voice
+   * past the cap as forever fresh — one obsessive keyboard could pump an
+   * already-hot topic at full weight. This ledger has no cap-off.
+   */
+  voices: string[];
   /** When the weights were last decayed. */
   decayedAt: number;
 }
@@ -80,7 +90,15 @@ export interface MemoryInput {
   id: string;
   body: string;
   postedAt: string;
+  /** Display name — labels and the voices list only, never identity. */
   author?: string;
+  /**
+   * Stable account id. Voice damping keys on this when present: display names
+   * are user-chosen, collide ("Dave"), and every failed profile lookup shares
+   * the literal "Anonymous" — an outage must not alias the whole room into one
+   * quarter-stepped voice.
+   */
+  authorUuid?: string;
 }
 
 export interface MemoryOptions {
@@ -123,15 +141,42 @@ const MAX_EDGES = 300;
 const REPEAT_STEP = 0.25;
 
 /**
+ * A stripped print shorter than this is too little text to call two bodies
+ * "the same rant" — short slogans legitimately differ only in a number or an
+ * exclamation mark, so they fall back to the exact wording.
+ */
+const MIN_PRINT_LETTERS = 12;
+
+/**
  * Cheap fingerprint of what a comment says: lowercased, whitespace-collapsed,
  * then hashed (djb2-xor) so the rolling `bodies` list stays small in the
- * snapshot. The length rides along to make accidental collisions vanishing.
+ * snapshot. Digits and punctuation are the cheapest things for a flood to
+ * vary ("…pure evil 1", "…pure evil 2"), so the print is taken over letters
+ * and spaces only — unless that residue is too short to be distinctive
+ * ("send 100 quid" vs "send 500 quid" are genuinely different comments),
+ * where the exact text stands. The length rides along so accidental hash
+ * collisions stay vanishing.
  */
 function fingerprint(body: string): string {
   const text = body.toLowerCase().replace(/\s+/g, " ").trim();
+  const letters = text.replace(/[^\p{L} ]+/gu, "").replace(/\s+/g, " ").trim();
+  const base = letters.length >= MIN_PRINT_LETTERS ? letters : text;
   let h = 5381;
-  for (let i = 0; i < text.length; i++) h = (Math.imul(h, 33) ^ text.charCodeAt(i)) >>> 0;
-  return `${h.toString(36)}:${text.length.toString(36)}`;
+  for (let i = 0; i < base.length; i++) h = (Math.imul(h, 33) ^ base.charCodeAt(i)) >>> 0;
+  return `${h.toString(36)}:${base.length.toString(36)}`;
+}
+
+/**
+ * One-way key marking that a voice has already spoken on a topic. Hashed so
+ * the snapshot never stores account ids next to topic names. Folded nodes
+ * change id, so a survivor briefly reads its inherited voices as fresh — a
+ * one-step, decaying imprecision not worth reverse-mapping hashes for.
+ */
+function voiceKey(nodeId: string, voiceId: string): string {
+  const s = `${nodeId}${SEP}${voiceId}`;
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
 }
 
 /**
@@ -142,7 +187,7 @@ function fingerprint(body: string): string {
 const SEP = String.fromCharCode(31); // ASCII unit separator; topics contain spaces, so a space would be ambiguous
 
 export function emptyMemory(now = 0): TopicMemory {
-  return { nodes: {}, edges: {}, seen: [], bodies: [], decayedAt: now };
+  return { nodes: {}, edges: {}, seen: [], bodies: [], voices: [], decayedAt: now };
 }
 
 /** Stable, order-independent key for the link between two topics. */
@@ -208,6 +253,7 @@ export function reinforceMemory(
   const matchers = trends.map((t) => ({ label: t.word, re: termRegex(t.word, t.pattern) }));
 
   const knownBodies = new Set((mem.bodies ??= []));
+  const knownVoices = new Set((mem.voices ??= []));
 
   for (const c of comments) {
     if (seen.has(c.id)) continue;
@@ -262,13 +308,15 @@ export function reinforceMemory(
       if (!folded && (!node.label || labelQuality(label) > labelQuality(node.label))) {
         node.label = label;
       }
-      const author = c.author ?? "";
-      const knownVoice = node.authors.includes(author);
+      // Identity comes from the account id when the feed supplies one; the
+      // display name is only a fallback (and the voices-list label below).
+      const voiceId = c.authorUuid ?? c.author ?? "";
+      const vkey = voiceKey(id, voiceId);
       // Novelty carries the weight, repetition only keeps it warm: a repeated
-      // body or an already-counted voice reinforces at a fraction. (A topic
-      // whose author list has hit its cap treats everyone as fresh — by then
-      // it is genuinely broad, and damping exists for the narrow topics one
-      // keyboard, or one rant, keeps warm.)
+      // body or an already-counted voice reinforces at a fraction. The voice
+      // ledger has no cap, so damping keeps working on hot topics whose
+      // display list stopped admitting names long ago.
+      const knownVoice = knownVoices.has(vkey);
       const step = copied || knownVoice ? REPEAT_STEP : 1;
       steps.set(id, Math.min(steps.get(id) ?? 1, step));
       node.weight += step;
@@ -280,10 +328,16 @@ export function reinforceMemory(
       }
       // Breadth counts people who brought their own words — a copy-pasted body
       // never adds its poster to the voices, so fifty socks reposting one rant
-      // read as one voice, not a crowd. Measured against everyone ever seen on
-      // this topic, so one commenter posting all evening stays one voice too.
-      if (!copied && !knownVoice && node.authors.length < MAX_AUTHORS) {
-        node.authors.push(author);
+      // read as one voice, not a crowd. The ledger remembers them either way;
+      // the capped display list additionally dedupes by name, since two "Dave"s
+      // are two voices for damping but one line on a disc.
+      if (!copied && !knownVoice) {
+        knownVoices.add(vkey);
+        mem.voices.push(vkey);
+        const name = c.author ?? "";
+        if (node.authors.length < MAX_AUTHORS && !node.authors.includes(name)) {
+          node.authors.push(name);
+        }
       }
     }
 
@@ -301,6 +355,9 @@ export function reinforceMemory(
 
   if (mem.seen.length > maxSeen) mem.seen = mem.seen.slice(-maxSeen);
   if (mem.bodies.length > maxSeen) mem.bodies = mem.bodies.slice(-maxSeen);
+  // Each comment can add one entry per topic it argues, so the voice ledger
+  // fills faster than the others — give it proportionate room before rolling.
+  if (mem.voices.length > maxSeen * 2) mem.voices = mem.voices.slice(-maxSeen * 2);
   consolidateMemory(mem, opts);
   prune(mem, opts);
   return mem;
@@ -861,6 +918,7 @@ export function deserializeMemory(raw: string | null, now: number): TopicMemory 
       edges: parsed.edges,
       seen: Array.isArray(parsed.seen) ? parsed.seen : [],
       bodies: Array.isArray(parsed.bodies) ? parsed.bodies : [],
+      voices: Array.isArray(parsed.voices) ? parsed.voices : [],
       decayedAt: typeof parsed.decayedAt === "number" ? parsed.decayedAt : now,
     };
   } catch {
